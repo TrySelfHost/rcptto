@@ -1,0 +1,40 @@
+# golangci-lint configuration for rcpttō.
+# Curated, strict-but-practical. Run: golangci-lint run
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck        # unchecked errors
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - revive          # style/lint (golint successor)
+    - gocritic
+    - bodyclose       # http/response bodies closed
+    - noctx           # requests carry a context
+    - errorlint       # correct error wrapping/matching
+    - unconvert
+    - prealloc
+    - nolintlint
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/tryselfhost/rcptto
+  revive:
+    rules:
+      - name: exported
+        arguments: [checkPrivateReceivers]
+  misspell:
+    locale: US
+
+issues:
+  max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters: [errcheck, bodyclose] # tests may ignore some errors deliberately
