@@ -174,8 +174,13 @@ func NewBinding(id string) Binding {
 	return Binding{IDValue: id, HELOValue: "mail.test.invalid", MailFromValue: "probe@test.invalid"}
 }
 
-func (b Binding) ID() string       { return b.IDValue }
-func (b Binding) HELO() string     { return b.HELOValue }
+// ID returns the egress identity id.
+func (b Binding) ID() string { return b.IDValue }
+
+// HELO returns the EHLO/HELO hostname to present.
+func (b Binding) HELO() string { return b.HELOValue }
+
+// MailFrom returns the envelope sender to use in the probe.
 func (b Binding) MailFrom() string { return b.MailFromValue }
 
 // DialContext dials directly; provided for interface completeness.

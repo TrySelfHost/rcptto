@@ -44,6 +44,7 @@ func (s Status) Valid() bool {
 	}
 }
 
+// String returns the Status as its underlying string value.
 func (s Status) String() string { return string(s) }
 
 // SubStatus is a stable, machine-readable reason code that explains a Status.
@@ -77,6 +78,7 @@ const (
 	SubNoConnect        SubStatus = "no_connect"
 )
 
+// String returns the SubStatus as its underlying string value.
 func (s SubStatus) String() string { return string(s) }
 
 // Checks is the per-stage breakdown behind a Verdict. Fields are populated as
