@@ -1,17 +1,13 @@
 name: ci
-
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions:
   contents: read
-
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   test:
     name: test & vet
@@ -30,7 +26,6 @@ jobs:
         run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
       - name: build
         run: go build ./...
-
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
@@ -42,4 +37,4 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.12.2
