@@ -20,8 +20,11 @@ What exists today:
 | [`pkg/engine/mock`](pkg/engine/mock) | Deterministic mock engine + test egress binding — lets the rest of the codebase be tested without real mail servers or port 25. | ✅ implemented + tested |
 | [`internal/pipeline`](internal/pipeline) | The verification funnel: syntax → normalize → disposable → role → free → MX. Returns a terminal verdict or a "needs-probe" task. Cheap, in-memory checks run before the one network-bound (DNS) stage. | ✅ implemented + tested |
 | [`pkg/engine/builtin`](pkg/engine/builtin) | The default SMTP engine (the probe stage): native `net/textproto` client, MX failover, catch-all detection, and careful classification of mailbox-not-found vs. policy-block vs. greylisting. MIT/Apache-clean, linked in-process. | ✅ implemented + tested |
+| [`internal/store`](internal/store) + [`memory`](internal/store/memory) | Persistence ports (`ResultStore`) with an in-memory TTL adapter. Postgres adapter plugs in behind the same port later. | ✅ implemented + tested |
+| [`internal/verifier`](internal/verifier) | Composition root: runs the funnel, probes survivors through an egress identity, applies the result cache, and merges funnel + SMTP findings. Includes the `EgressProvider` seam for the future reputation manager. | ✅ implemented + tested |
+| [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 
-Coming next (in priority order): **persistence + the `/v1` API** (submit, job status, results), then wiring the funnel and engine together behind it. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next (in priority order): **bulk jobs + async processing** (queue/worker), then the **Postgres store adapter** and the **egress reputation manager**. See the [roadmap](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -47,7 +50,27 @@ make check   # fmt + vet + test — the local pre-commit gate
 make help    # list all targets
 ```
 
-There is nothing to *run* yet — the buildable surface is the library packages above. A `make dev` full-stack target (server + worker + Postgres + Redis + mock SMTP) arrives with the API milestone.
+### Run the server
+
+```bash
+go run ./cmd/rcptto-server        # listens on :8080 by default
+
+# in another shell:
+curl -s localhost:8080/healthz
+curl -s -X POST localhost:8080/v1/verify \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"someone@example.com"}'
+```
+
+Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
+`RCPTTO_API_KEYS` (comma-separated; when set, `/v1/*` requires an `X-API-Key`
+header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, and `RCPTTO_DETECT_CATCHALL`.
+
+> **Note on port 25:** live SMTP verification requires outbound port 25, which
+> most residential ISPs and cloud providers block by default. On such a host the
+> probe stage will report `unknown`/`no_connect` — the funnel (syntax, MX,
+> disposable, role) still works. Run somewhere with port 25 egress for full
+> verification.
 
 ## Repository layout (target)
 
