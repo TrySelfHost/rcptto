@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/api"
+	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/internal/verifier"
@@ -51,9 +52,14 @@ func run() error {
 		Cache:  memory.NewResultStore(),
 	})
 
+	runner := jobs.New(jobs.Config{
+		Store:    memory.NewJobStore(),
+		Verifier: svc,
+	})
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(api.Config{Verifier: svc, APIKeys: apiKeys}).Handler(),
+		Handler:           api.New(api.Config{Verifier: svc, Jobs: runner, APIKeys: apiKeys}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

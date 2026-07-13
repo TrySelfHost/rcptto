@@ -1,0 +1,113 @@
+package memory
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/tryselfhost/rcptto/internal/store"
+	"github.com/tryselfhost/rcptto/pkg/verdict"
+)
+
+// JobStore is a concurrency-safe, in-memory store.JobStore.
+type JobStore struct {
+	mu   sync.Mutex
+	jobs map[string]*jobEntry
+	now  func() time.Time
+}
+
+type jobEntry struct {
+	job     store.Job
+	results []verdict.Verdict
+}
+
+// NewJobStore returns an empty in-memory JobStore.
+func NewJobStore() *JobStore {
+	return &JobStore{jobs: make(map[string]*jobEntry), now: time.Now}
+}
+
+// CreateJob implements store.JobStore.
+func (s *JobStore) CreateJob(_ context.Context, job store.Job) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs[job.ID] = &jobEntry{job: job}
+	return nil
+}
+
+// GetJob implements store.JobStore.
+func (s *JobStore) GetJob(_ context.Context, id string) (store.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.jobs[id]
+	if !ok {
+		return store.Job{}, store.ErrJobNotFound
+	}
+	return e.job, nil
+}
+
+// AppendResult implements store.JobStore.
+func (s *JobStore) AppendResult(_ context.Context, jobID string, v verdict.Verdict) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.jobs[jobID]
+	if !ok {
+		return store.ErrJobNotFound
+	}
+	e.results = append(e.results, v)
+	e.job.Done++
+	if e.job.Status != store.JobCanceled && e.job.Done >= e.job.Total {
+		e.job.Status = store.JobCompleted
+		t := s.now()
+		e.job.CompletedAt = &t
+	}
+	return nil
+}
+
+// Results implements store.JobStore.
+func (s *JobStore) Results(_ context.Context, jobID string, cursor, limit int) ([]verdict.Verdict, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.jobs[jobID]
+	if !ok {
+		return nil, 0, store.ErrJobNotFound
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if limit <= 0 {
+		limit = len(e.results)
+	}
+	if cursor >= len(e.results) {
+		return []verdict.Verdict{}, 0, nil
+	}
+	end := cursor + limit
+	if end > len(e.results) {
+		end = len(e.results)
+	}
+	page := make([]verdict.Verdict, end-cursor)
+	copy(page, e.results[cursor:end])
+
+	next := 0
+	if end < len(e.results) {
+		next = end
+	}
+	return page, next, nil
+}
+
+// SetStatus implements store.JobStore.
+func (s *JobStore) SetStatus(_ context.Context, jobID string, status store.JobStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.jobs[jobID]
+	if !ok {
+		return store.ErrJobNotFound
+	}
+	e.job.Status = status
+	if status == store.JobCompleted || status == store.JobCanceled {
+		if e.job.CompletedAt == nil {
+			t := s.now()
+			e.job.CompletedAt = &t
+		}
+	}
+	return nil
+}

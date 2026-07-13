@@ -22,9 +22,10 @@ What exists today:
 | [`pkg/engine/builtin`](pkg/engine/builtin) | The default SMTP engine (the probe stage): native `net/textproto` client, MX failover, catch-all detection, and careful classification of mailbox-not-found vs. policy-block vs. greylisting. MIT/Apache-clean, linked in-process. | ✅ implemented + tested |
 | [`internal/store`](internal/store) + [`memory`](internal/store/memory) | Persistence ports (`ResultStore`) with an in-memory TTL adapter. Postgres adapter plugs in behind the same port later. | ✅ implemented + tested |
 | [`internal/verifier`](internal/verifier) | Composition root: runs the funnel, probes survivors through an egress identity, applies the result cache, and merges funnel + SMTP findings. Includes the `EgressProvider` seam for the future reputation manager. | ✅ implemented + tested |
-| [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
+| [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
+| [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 
-Coming next (in priority order): **bulk jobs + async processing** (queue/worker), then the **Postgres store adapter** and the **egress reputation manager**. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next (in priority order): the **Postgres store adapter** (durable jobs/results behind the same ports) and the **egress reputation manager**. See the [roadmap](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -60,6 +61,13 @@ curl -s localhost:8080/healthz
 curl -s -X POST localhost:8080/v1/verify \
   -H 'Content-Type: application/json' \
   -d '{"email":"someone@example.com"}'
+
+# bulk: submit a job, then poll status and fetch results
+JOB=$(curl -s -X POST localhost:8080/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"emails":["a@example.com","b@example.com"]}' | jq -r .id)
+curl -s localhost:8080/v1/jobs/$JOB
+curl -s "localhost:8080/v1/jobs/$JOB/results?limit=100"
 ```
 
 Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),

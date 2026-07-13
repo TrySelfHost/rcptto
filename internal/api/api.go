@@ -22,6 +22,8 @@ type Verifier interface {
 type Config struct {
 	// Verifier performs single-address verification. Required.
 	Verifier Verifier
+	// Jobs handles bulk verification. Optional; when nil, /v1/jobs returns 501.
+	Jobs Jobs
 	// APIKeys, when non-empty, are the accepted X-API-Key values for /v1/*
 	// routes. When empty, /v1 is open (development mode).
 	APIKeys []string
@@ -30,6 +32,7 @@ type Config struct {
 // Server holds the API dependencies and builds the HTTP handler.
 type Server struct {
 	verifier Verifier
+	jobs     Jobs
 	apiKeys  map[string]struct{}
 }
 
@@ -44,13 +47,17 @@ func New(cfg Config) *Server {
 			keys[k] = struct{}{}
 		}
 	}
-	return &Server{verifier: cfg.Verifier, apiKeys: keys}
+	return &Server{verifier: cfg.Verifier, jobs: cfg.Jobs, apiKeys: keys}
 }
 
 // Handler returns the composed HTTP handler with routes and middleware.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/verify", s.handleVerify)
+	mux.HandleFunc("POST /v1/jobs", s.handleCreateJob)
+	mux.HandleFunc("GET /v1/jobs/{id}", s.handleGetJob)
+	mux.HandleFunc("GET /v1/jobs/{id}/results", s.handleJobResults)
+	mux.HandleFunc("POST /v1/jobs/{id}/cancel", s.handleCancelJob)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	return s.authMiddleware(mux)
