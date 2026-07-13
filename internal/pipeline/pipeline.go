@@ -139,6 +139,7 @@ func (p *Pipeline) Run(ctx context.Context, email string) (Result, error) {
 			Normalized: s.Normalized,
 			Domain:     s.Domain,
 			Provider:   s.Provider,
+			MX:         s.MX,
 		},
 		Checks:   s.Checks,
 		Provider: s.Provider,

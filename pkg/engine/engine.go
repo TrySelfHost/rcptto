@@ -27,6 +27,9 @@ type Task struct {
 	Normalized string // canonical form (e.g. gmail dots/+tags collapsed)
 	Domain     string
 	Provider   string // resolved destination provider class, if known
+	// MX holds the destination mail exchangers in preference order, resolved by
+	// the control plane so the engine does not re-query DNS.
+	MX []string
 }
 
 // EgressBinding is the network identity a probe must originate from. It abstracts
