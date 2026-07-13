@@ -6,7 +6,7 @@ run:
   timeout: 5m
 
 linters:
-  default: standard   # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
   enable:
     - misspell
     - revive
@@ -26,9 +26,12 @@ linters:
       locale: US
   exclusions:
     rules:
-      # tests may deliberately ignore some errors
       - path: _test\.go
         linters: [errcheck, bodyclose]
+      - linters: [revive]
+        text: "exported const .* should have comment"
+      - linters: [revive]
+        text: "comment on exported const .* should be of the form"
 
 formatters:
   enable:
