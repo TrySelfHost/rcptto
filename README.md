@@ -18,8 +18,9 @@ What exists today:
 | [`pkg/verdict`](pkg/verdict) | The stable, public four-valued result type (`deliverable`/`undeliverable`/`risky`/`unknown`) + reason codes. | ✅ implemented + tested |
 | [`pkg/engine`](pkg/engine) | The pluggable `VerificationEngine` port and supporting types (`Task`, `EgressBinding`, `Signal`, `Caps`). | ✅ interface defined |
 | [`pkg/engine/mock`](pkg/engine/mock) | Deterministic mock engine + test egress binding — lets the rest of the codebase be tested without real mail servers or port 25. | ✅ implemented + tested |
+| [`internal/pipeline`](internal/pipeline) | The verification funnel: syntax → normalize → disposable → role → free → MX. Returns a terminal verdict or a "needs-probe" task. Cheap, in-memory checks run before the one network-bound (DNS) stage. | ✅ implemented + tested |
 
-Coming next (in priority order): the **funnel/pipeline** (syntax → normalize → MX → disposable/role/free), the **builtin engine**, then persistence + the `/v1` API. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next (in priority order): the **builtin SMTP engine** (the probe stage), then **persistence + the `/v1` API**. See the [roadmap](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
