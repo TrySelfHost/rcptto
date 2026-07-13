@@ -43,3 +43,31 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
+
+  integration:
+    name: integration (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rcptto
+          POSTGRES_PASSWORD: rcptto
+          POSTGRES_DB: rcptto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rcptto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: integration tests
+        run: go test -tags=integration ./internal/store/postgres/...
+        env:
+          DATABASE_URL: postgres://rcptto:rcptto@localhost:5432/rcptto?sslmode=disable

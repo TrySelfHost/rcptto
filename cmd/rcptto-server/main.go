@@ -21,9 +21,13 @@ import (
 	"github.com/tryselfhost/rcptto/internal/egress"
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
+	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
+	"github.com/tryselfhost/rcptto/internal/store/postgres"
 	"github.com/tryselfhost/rcptto/internal/verifier"
 	"github.com/tryselfhost/rcptto/pkg/engine/builtin"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 )
 
 func main() {
@@ -41,6 +45,25 @@ func run() error {
 	mailFrom := getenv("RCPTTO_MAIL_FROM", "verify@localhost")
 	apiKeys := splitAndTrim(os.Getenv("RCPTTO_API_KEYS"))
 	detectCatchAll := getenvBool("RCPTTO_DETECT_CATCHALL", true)
+
+	var (
+		resultCache store.ResultStore = memory.NewResultStore()
+		jobStore    store.JobStore    = memory.NewJobStore()
+	)
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		db, err := postgres.Open(context.Background(), dsn)
+		if err != nil {
+			return err
+		}
+		if err := postgres.Migrate(context.Background(), db); err != nil {
+			return err
+		}
+		resultCache = postgres.NewResultStore(db)
+		jobStore = postgres.NewJobStore(db)
+		log.Info("using postgres store")
+	} else {
+		log.Info("using in-memory store (set DATABASE_URL for persistence)")
+	}
 
 	egressMgr := egress.New(egress.Config{
 		Identities: []egress.Spec{{
@@ -61,11 +84,11 @@ func run() error {
 		}),
 		Egress: egressMgr,
 		Sink:   egressMgr,
-		Cache:  memory.NewResultStore(),
+		Cache:  resultCache,
 	})
 
 	runner := jobs.New(jobs.Config{
-		Store:    memory.NewJobStore(),
+		Store:    jobStore,
 		Verifier: svc,
 	})
 

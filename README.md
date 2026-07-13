@@ -20,13 +20,14 @@ What exists today:
 | [`pkg/engine/mock`](pkg/engine/mock) | Deterministic mock engine + test egress binding — lets the rest of the codebase be tested without real mail servers or port 25. | ✅ implemented + tested |
 | [`internal/pipeline`](internal/pipeline) | The verification funnel: syntax → normalize → disposable → role → free → MX. Returns a terminal verdict or a "needs-probe" task. Cheap, in-memory checks run before the one network-bound (DNS) stage. | ✅ implemented + tested |
 | [`pkg/engine/builtin`](pkg/engine/builtin) | The default SMTP engine (the probe stage): native `net/textproto` client, MX failover, catch-all detection, and careful classification of mailbox-not-found vs. policy-block vs. greylisting. MIT/Apache-clean, linked in-process. | ✅ implemented + tested |
-| [`internal/store`](internal/store) + [`memory`](internal/store/memory) | Persistence ports (`ResultStore`) with an in-memory TTL adapter. Postgres adapter plugs in behind the same port later. | ✅ implemented + tested |
+| [`internal/store`](internal/store) + [`memory`](internal/store/memory) | Persistence ports (`ResultStore`, `JobStore`) with in-memory adapters — the zero-dependency default. | ✅ implemented + tested |
+| [`internal/store/postgres`](internal/store/postgres) | Durable Postgres adapters behind the same ports, with an embedded, self-applying migration runner. Pure `database/sql` (driver chosen in `main`). | ✅ implemented + CI integration-tested |
 | [`internal/verifier`](internal/verifier) | Composition root: runs the funnel, probes survivors through an egress identity, applies the result cache, and merges funnel + SMTP findings. Includes the `EgressProvider` seam for the future reputation manager. | ✅ implemented + tested |
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
 
-Coming next (in priority order): the **Postgres store adapter** (durable jobs/results/egress behind the same ports) and **DNSBL/PTR audits** feeding the reputation manager. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next (in priority order): the **provider-policy engine** (probe/skip/statistical per destination) and **DNSBL/PTR audits** feeding the reputation manager. See the [roadmap](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -74,6 +75,28 @@ curl -s "localhost:8080/v1/jobs/$JOB/results?limit=100"
 Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
 `RCPTTO_API_KEYS` (comma-separated; when set, `/v1/*` requires an `X-API-Key`
 header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, and `RCPTTO_DETECT_CATCHALL`.
+
+### Persistence (Postgres)
+
+By default the server keeps results and jobs in memory (lost on restart). Set
+`DATABASE_URL` to use Postgres instead — the server applies the embedded
+migrations on startup automatically:
+
+```bash
+docker compose -f deploy/compose/docker-compose.postgres.yml up -d
+export DATABASE_URL='postgres://rcptto:rcptto@localhost:5432/rcptto?sslmode=disable'
+go run ./cmd/rcptto-server        # now durable; auto-migrates on boot
+```
+
+The Postgres adapters live in `internal/store/postgres` and implement the same
+`ResultStore`/`JobStore` ports as the in-memory ones — nothing else in the
+codebase changes. The SQL driver (`pgx`) is imported only in `main`, so run
+`go mod tidy` once after pulling this in to fetch it. Integration tests run
+against a real database:
+
+```bash
+go test -tags=integration ./internal/store/postgres/...   # needs DATABASE_URL
+```
 
 > **Note on port 25:** live SMTP verification requires outbound port 25, which
 > most residential ISPs and cloud providers block by default. On such a host the
