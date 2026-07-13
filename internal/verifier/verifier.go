@@ -109,15 +109,21 @@ func (s *Service) Verify(ctx context.Context, email string) (verdict.Verdict, er
 		}
 	}
 
-	s.cachePut(ctx, key, final)
+	// Do not cache unknown/deferred results — they are retryable (greylisting,
+	// timeouts, no egress available now). Only stable verdicts are cached.
+	if final.Status != verdict.StatusUnknown {
+		s.cachePut(ctx, key, final)
+	}
 	return final, nil
 }
 
 // probe runs the engine against a survived funnel result and merges findings.
+// When no egress identity is available (e.g. all quarantined), it returns an
+// honest deferred "unknown" rather than failing the request.
 func (s *Service) probe(ctx context.Context, res pipeline.Result) (verdict.Verdict, error) {
 	binding, err := s.egress.Binding(ctx, res.Task)
 	if err != nil {
-		return verdict.Verdict{}, err
+		return s.noEgressVerdict(res), nil
 	}
 	ev, signals, err := s.engine.Verify(ctx, res.Task, binding)
 	if err != nil {
@@ -125,6 +131,21 @@ func (s *Service) probe(ctx context.Context, res pipeline.Result) (verdict.Verdi
 	}
 	s.sink.Emit(ctx, signals)
 	return merge(res, ev), nil
+}
+
+// noEgressVerdict builds a deferred unknown verdict that preserves the funnel's
+// findings, used when the egress pool cannot currently supply an identity.
+func (s *Service) noEgressVerdict(res pipeline.Result) verdict.Verdict {
+	return verdict.Verdict{
+		Email:      res.Task.Email,
+		Normalized: res.Task.Normalized,
+		Status:     verdict.StatusUnknown,
+		SubStatus:  verdict.SubTemporaryFailure,
+		Confidence: 0.1,
+		Checks:     res.Checks,
+		Provider:   res.Provider,
+		CheckedAt:  s.now(),
+	}
 }
 
 // merge combines the funnel's findings with the engine's SMTP verdict into the

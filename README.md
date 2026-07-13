@@ -24,8 +24,9 @@ What exists today:
 | [`internal/verifier`](internal/verifier) | Composition root: runs the funnel, probes survivors through an egress identity, applies the result cache, and merges funnel + SMTP findings. Includes the `EgressProvider` seam for the future reputation manager. | ✅ implemented + tested |
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
+| [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
 
-Coming next (in priority order): the **Postgres store adapter** (durable jobs/results behind the same ports) and the **egress reputation manager**. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next (in priority order): the **Postgres store adapter** (durable jobs/results/egress behind the same ports) and **DNSBL/PTR audits** feeding the reputation manager. See the [roadmap](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/api"
+	"github.com/tryselfhost/rcptto/internal/egress"
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
@@ -41,6 +42,16 @@ func run() error {
 	apiKeys := splitAndTrim(os.Getenv("RCPTTO_API_KEYS"))
 	detectCatchAll := getenvBool("RCPTTO_DETECT_CATCHALL", true)
 
+	egressMgr := egress.New(egress.Config{
+		Identities: []egress.Spec{{
+			ID:        "direct",
+			Kind:      egress.KindLocalIP,
+			HELO:      helo,
+			MailFrom:  mailFrom,
+			Transport: egress.DirectTransport{},
+		}},
+	})
+
 	svc := verifier.New(verifier.Config{
 		Pipeline: pipeline.New(pipeline.Config{}),
 		Engine: builtin.New(builtin.Config{
@@ -48,7 +59,8 @@ func run() error {
 			MailFrom:       mailFrom,
 			DetectCatchAll: detectCatchAll,
 		}),
-		Egress: verifier.DirectProvider{HELO: helo, MailFrom: mailFrom},
+		Egress: egressMgr,
+		Sink:   egressMgr,
 		Cache:  memory.NewResultStore(),
 	})
 
