@@ -7,6 +7,19 @@
 
 ---
 
+## Deployment scope (current)
+
+This build targets **a single VPS with Docker Compose** — not Kubernetes. The
+`internal/jobs` worker pool runs in-process, egress defaults to one identity
+(the host's own IP), and Postgres is a single instance. That's the right shape
+for TrySelfHost's actual scale today.
+
+Kubernetes, Helm charts, NATS/JetStream, and ClickHouse are described in the
+[design doc](docs/DESIGN.md) as the path for high-volume, multi-node
+deployments (§15), but are **not** part of the current roadmap — they add
+real operational cost with no benefit below roughly 10M verifications/day.
+Revisit only if that scale becomes a real requirement.
+
 ## Status
 
 🚧 **Early development.** This repository is being built up module by module from the [architecture proposal](docs/DESIGN.md). It is **not yet runnable end-to-end.**
@@ -26,8 +39,9 @@ What exists today:
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
+| [`internal/policy`](internal/policy) | Provider-policy engine — the honesty layer. Declarative probe/skip rules per destination provider, with sane defaults (Gmail/Yahoo/Microsoft/365 → skip, since probing them is unreliable and burns reputation for no signal). A skip never reaches the engine; the verdict is an honest `risky/provider_skipped`. | ✅ implemented + tested |
 
-Coming next (in priority order): the **provider-policy engine** (probe/skip/statistical per destination) and **DNSBL/PTR audits** feeding the reputation manager. See the [roadmap](docs/DESIGN.md#22-roadmap).
+Coming next: **DNSBL/PTR audits** feeding the reputation manager, and an admin surface for editing provider policy and egress identities at runtime. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 

@@ -21,6 +21,7 @@ import (
 	"github.com/tryselfhost/rcptto/internal/egress"
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
+	"github.com/tryselfhost/rcptto/internal/policy"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/internal/store/postgres"
@@ -85,6 +86,7 @@ func run() error {
 		Egress: egressMgr,
 		Sink:   egressMgr,
 		Cache:  resultCache,
+		Policy: policy.Default(),
 	})
 
 	runner := jobs.New(jobs.Config{

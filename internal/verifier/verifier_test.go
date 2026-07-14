@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tryselfhost/rcptto/internal/pipeline"
+	"github.com/tryselfhost/rcptto/internal/policy"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 	"github.com/tryselfhost/rcptto/pkg/engine/mock"
@@ -43,6 +44,7 @@ func testPipeline() *pipeline.Pipeline {
 	return pipeline.New(pipeline.Config{
 		Resolver: fakeResolver{mx: map[string][]*net.MX{
 			"example.com": {{Host: "mx1.example.com.", Pref: 10}},
+			"gmail.com":   {{Host: "gmail-smtp-in.l.google.com.", Pref: 5}},
 		}},
 	})
 }
@@ -97,6 +99,57 @@ func TestRoleAccountDowngrade(t *testing.T) {
 	}
 	if !v.Checks.Role {
 		t.Errorf("role check flag missing")
+	}
+}
+
+func TestPolicySkipAvoidsProbe(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	skipGmail := policy.New(map[string]policy.Rule{
+		"gmail": {Strategy: policy.StrategySkip, Reason: "test skip"},
+	})
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy, Policy: skipGmail})
+
+	v, err := svc.Verify(context.Background(), "someone@gmail.com")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if v.Status != verdict.StatusRisky || v.SubStatus != verdict.SubProviderSkipped {
+		t.Fatalf("got (%s,%s), want risky/provider_skipped", v.Status, v.SubStatus)
+	}
+	if spy.calls != 0 {
+		t.Errorf("engine should not be called when policy skips, calls=%d", spy.calls)
+	}
+	// Funnel findings (syntax/mx) must still be preserved even though skipped.
+	if !v.Checks.Syntax.Valid {
+		t.Errorf("syntax check should still be populated: %+v", v.Checks)
+	}
+}
+
+func TestPolicyDefaultProbesUnlistedProvider(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy}) // uses policy.Default()
+
+	if _, err := svc.Verify(context.Background(), "user@example.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if spy.calls != 1 {
+		t.Errorf("custom domain should be probed under the default policy, calls=%d", spy.calls)
+	}
+}
+
+func TestDefaultPolicySkipsGmailEndToEnd(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy}) // uses policy.Default()
+
+	v, err := svc.Verify(context.Background(), "someone@gmail.com")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if v.SubStatus != verdict.SubProviderSkipped {
+		t.Fatalf("default policy should skip gmail, got %+v", v)
+	}
+	if spy.calls != 0 {
+		t.Errorf("engine should not be called, calls=%d", spy.calls)
 	}
 }
 

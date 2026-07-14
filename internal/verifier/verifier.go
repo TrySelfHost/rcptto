@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/pipeline"
+	"github.com/tryselfhost/rcptto/internal/policy"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 	"github.com/tryselfhost/rcptto/pkg/verdict"
@@ -40,6 +41,7 @@ type Config struct {
 	Cache    store.ResultStore // optional; nil disables caching
 	CacheTTL time.Duration     // defaults to 24h
 	Sink     SignalSink        // defaults to no-op
+	Policy   *policy.Set       // defaults to policy.Default()
 	Now      func() time.Time  // defaults to time.Now
 }
 
@@ -51,6 +53,7 @@ type Service struct {
 	cache    store.ResultStore
 	cacheTTL time.Duration
 	sink     SignalSink
+	policy   *policy.Set
 	now      func() time.Time
 }
 
@@ -67,6 +70,7 @@ func New(cfg Config) *Service {
 		cache:    cfg.Cache,
 		cacheTTL: cfg.CacheTTL,
 		sink:     cfg.Sink,
+		policy:   cfg.Policy,
 		now:      cfg.Now,
 	}
 	if s.egress == nil {
@@ -77,6 +81,9 @@ func New(cfg Config) *Service {
 	}
 	if s.sink == nil {
 		s.sink = noopSink{}
+	}
+	if s.policy == nil {
+		s.policy = policy.Default()
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -103,9 +110,13 @@ func (s *Service) Verify(ctx context.Context, email string) (verdict.Verdict, er
 
 	final := res.Verdict
 	if !res.Terminal {
-		final, err = s.probe(ctx, res)
-		if err != nil {
-			return verdict.Verdict{}, err
+		if rule := s.policy.Lookup(policyKey(res)); rule.Strategy == policy.StrategySkip {
+			final = s.skipVerdict(res, rule)
+		} else {
+			final, err = s.probe(ctx, res)
+			if err != nil {
+				return verdict.Verdict{}, err
+			}
 		}
 	}
 
@@ -115,6 +126,34 @@ func (s *Service) Verify(ctx context.Context, email string) (verdict.Verdict, er
 		s.cachePut(ctx, key, final)
 	}
 	return final, nil
+}
+
+// policyKey returns the lookup key for a funnel result: the resolved provider
+// class when known, otherwise the domain, mirroring how the egress manager
+// keys destinations (see internal/egress destOf).
+func policyKey(res pipeline.Result) string {
+	if res.Provider != "" && res.Provider != "custom" {
+		return res.Provider
+	}
+	return res.Task.Domain
+}
+
+// skipVerdict builds the honest, no-probe verdict for a policy-skipped address.
+// Status is risky rather than a flat unknown: the funnel already confirmed
+// syntax and a deliverable MX, so the address is plausible — we simply cannot
+// confirm the mailbox without probing a provider that would not reward it with
+// a trustworthy answer.
+func (s *Service) skipVerdict(res pipeline.Result, rule policy.Rule) verdict.Verdict {
+	return verdict.Verdict{
+		Email:      res.Task.Email,
+		Normalized: res.Task.Normalized,
+		Status:     verdict.StatusRisky,
+		SubStatus:  verdict.SubProviderSkipped,
+		Confidence: 0.3,
+		Checks:     res.Checks,
+		Provider:   res.Provider,
+		CheckedAt:  s.now(),
+	}
 }
 
 // probe runs the engine against a survived funnel result and merges findings.
