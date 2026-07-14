@@ -40,8 +40,9 @@ What exists today:
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
 | [`internal/policy`](internal/policy) | Provider-policy engine — the honesty layer. Declarative probe/skip rules per destination provider, with sane defaults (Gmail/Yahoo/Microsoft/365 → skip, since probing them is unreliable and burns reputation for no signal). A skip never reaches the engine; the verdict is an honest `risky/provider_skipped`. | ✅ implemented + tested |
+| [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
 
-Coming next: **DNSBL/PTR audits** feeding the reputation manager, and an admin surface for editing provider policy and egress identities at runtime. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+Coming next: an admin surface for editing provider policy and egress identities at runtime, and wiring PTR/FCrDNS audits into the reputation score. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -88,7 +89,12 @@ curl -s "localhost:8080/v1/jobs/$JOB/results?limit=100"
 
 Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
 `RCPTTO_API_KEYS` (comma-separated; when set, `/v1/*` requires an `X-API-Key`
-header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, and `RCPTTO_DETECT_CATCHALL`.
+header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, `RCPTTO_DETECT_CATCHALL`, and
+`RCPTTO_DNSBL_ZONES` (comma-separated DNSBL zones, e.g. `zen.spamhaus.org`;
+when set, egress IPs are audited against them every 15 minutes and listed IPs
+are quarantined). Note that public DNSBLs like Spamhaus refuse queries from
+shared/public resolvers — use your own resolver or a proper data feed in
+production.
 
 ### Persistence (Postgres)
 

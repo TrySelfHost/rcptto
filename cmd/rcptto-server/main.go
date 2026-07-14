@@ -19,6 +19,7 @@ import (
 
 	"github.com/tryselfhost/rcptto/internal/api"
 	"github.com/tryselfhost/rcptto/internal/egress"
+	"github.com/tryselfhost/rcptto/internal/egress/audit"
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/policy"
@@ -103,6 +104,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Optional background DNSBL auditing of egress identities, tied to the
+	// server lifecycle.
+	if zones := splitAndTrim(os.Getenv("RCPTTO_DNSBL_ZONES")); len(zones) > 0 {
+		dnsbl := audit.NewDNSBL(audit.DirectResolver{}, zones)
+		go runDNSBLAudits(ctx, egressMgr, dnsbl, log)
+		log.Info("dnsbl auditing enabled", "zones", zones)
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Info("rcptto-server listening", "addr", addr, "auth", len(apiKeys) > 0)
@@ -144,6 +153,25 @@ func getenvBool(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+// runDNSBLAudits periodically checks egress identities against the configured
+// DNSBLs, quarantining any that become listed. It runs until ctx is canceled.
+func runDNSBLAudits(ctx context.Context, mgr *egress.Manager, dnsbl *audit.DNSBL, log *slog.Logger) {
+	const interval = 15 * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	mgr.AuditDNSBL(ctx, dnsbl) // once at startup
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			mgr.AuditDNSBL(ctx, dnsbl)
+			log.Debug("dnsbl audit completed")
+		}
+	}
 }
 
 func splitAndTrim(csv string) []string {

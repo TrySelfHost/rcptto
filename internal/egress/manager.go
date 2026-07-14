@@ -3,9 +3,11 @@ package egress
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/tryselfhost/rcptto/internal/egress/audit"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 )
 
@@ -69,6 +71,7 @@ type record struct {
 	lastReset        time.Time
 	blockStreak      int
 	quarantinedUntil time.Time
+	quarantineReason string
 	health           map[string]*health
 	circuits         map[string]*circuit
 }
@@ -186,8 +189,68 @@ func (m *Manager) Emit(_ context.Context, signals []engine.Signal) {
 	}
 }
 
-// selectLocked returns the healthiest eligible identity for dest, spreading load
-// via a used-today tie-break. Caller must hold the lock.
+// IdentityInfo is a read-only snapshot of an identity, for audits, admin, and
+// metrics.
+type IdentityInfo struct {
+	ID     string
+	IP     string
+	State  State
+	Reason string // quarantine reason, when applicable
+}
+
+// Identities returns a snapshot of the pool's identities.
+func (m *Manager) Identities() []IdentityInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]IdentityInfo, 0, len(m.order))
+	for _, id := range m.order {
+		r := m.records[id]
+		out = append(out, IdentityInfo{ID: id, IP: r.spec.IP, State: r.state, Reason: r.quarantineReason})
+	}
+	return out
+}
+
+// Quarantine withdraws an identity for the configured cool-down, recording a
+// reason. Used by audits (DNSBL hits) and operators. Unknown ids are ignored.
+func (m *Manager) Quarantine(id, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec := m.records[id]
+	if rec == nil {
+		return
+	}
+	rec.state = StateQuarantined
+	rec.quarantinedUntil = m.now().Add(m.quarantineCooldown)
+	rec.quarantineReason = reason
+}
+
+// AuditDNSBL checks every identity's IP against the given DNSBL and quarantines
+// any that are listed. DNS lookups run outside the lock (snapshot, check,
+// apply), so audits never block routing.
+func (m *Manager) AuditDNSBL(ctx context.Context, dnsbl *audit.DNSBL) {
+	type item struct {
+		id, ip   string
+		disabled bool
+	}
+	m.mu.Lock()
+	items := make([]item, 0, len(m.order))
+	for _, id := range m.order {
+		r := m.records[id]
+		items = append(items, item{id: id, ip: r.spec.IP, disabled: r.state == StateDisabled})
+	}
+	m.mu.Unlock()
+
+	for _, it := range items {
+		if it.ip == "" || it.disabled {
+			continue
+		}
+		listed, err := dnsbl.Check(ctx, it.ip)
+		if err != nil || len(listed) == 0 {
+			continue
+		}
+		m.Quarantine(it.id, "dnsbl:"+strings.Join(listed, ","))
+	}
+}
 func (m *Manager) selectLocked(dest string, now time.Time) *record {
 	var best *record
 	var bestScore float64

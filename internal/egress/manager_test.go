@@ -7,8 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tryselfhost/rcptto/internal/egress/audit"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 )
+
+// auditResolver is a programmable audit.Resolver for DNSBL integration tests.
+type auditResolver struct {
+	hosts map[string][]string
+}
+
+func (r auditResolver) LookupHost(_ context.Context, host string) ([]string, error) {
+	if a, ok := r.hosts[host]; ok {
+		return a, nil
+	}
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+func (r auditResolver) LookupAddr(_ context.Context, addr string) ([]string, error) {
+	return nil, &net.DNSError{Err: "no such host", Name: addr, IsNotFound: true}
+}
 
 // nopTransport satisfies Transport without dialing (selection tests never dial).
 type nopTransport struct{}
@@ -201,4 +218,56 @@ func TestEmitUnknownEgressIgnored(t *testing.T) {
 	m := New(Config{Identities: []Spec{spec("a", false)}})
 	// Must not panic.
 	m.Emit(context.Background(), []engine.Signal{blocked("ghost", "gmail")})
+}
+
+func specWithIP(id, ip string) Spec {
+	s := spec(id, false)
+	s.IP = ip
+	return s
+}
+
+func TestIdentitiesSnapshot(t *testing.T) {
+	m := New(Config{Identities: []Spec{specWithIP("a", "1.2.3.4"), specWithIP("b", "5.6.7.8")}})
+	infos := m.Identities()
+	if len(infos) != 2 {
+		t.Fatalf("got %d identities, want 2", len(infos))
+	}
+	if infos[0].ID != "a" || infos[0].IP != "1.2.3.4" || infos[0].State != StateActive {
+		t.Errorf("info[0] = %+v", infos[0])
+	}
+}
+
+func TestQuarantineWithReason(t *testing.T) {
+	m := New(Config{Identities: []Spec{specWithIP("a", "1.2.3.4")}})
+	m.Quarantine("a", "manual")
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); !errors.Is(err, ErrNoEgress) {
+		t.Errorf("quarantined identity should serve nothing, got %v", err)
+	}
+	infos := m.Identities()
+	if infos[0].State != StateQuarantined || infos[0].Reason != "manual" {
+		t.Errorf("info = %+v, want quarantined/manual", infos[0])
+	}
+}
+
+func TestAuditDNSBLQuarantinesListed(t *testing.T) {
+	m := New(Config{Identities: []Spec{specWithIP("clean", "1.1.1.1"), specWithIP("dirty", "9.9.9.9")}})
+
+	// DNSBL lists only 9.9.9.9 (reversed 9.9.9.9.zen -> listing code).
+	r := auditResolver{hosts: map[string][]string{
+		"9.9.9.9.zen.spamhaus.org": {"127.0.0.2"},
+	}}
+	dnsbl := audit.NewDNSBL(r, []string{"zen.spamhaus.org"})
+
+	m.AuditDNSBL(context.Background(), dnsbl)
+
+	infos := map[string]IdentityInfo{}
+	for _, i := range m.Identities() {
+		infos[i.ID] = i
+	}
+	if infos["dirty"].State != StateQuarantined {
+		t.Errorf("listed identity should be quarantined, got %s", infos["dirty"].State)
+	}
+	if infos["clean"].State != StateActive {
+		t.Errorf("clean identity should stay active, got %s", infos["clean"].State)
+	}
 }

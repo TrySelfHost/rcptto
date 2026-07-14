@@ -71,6 +71,9 @@ type Spec struct {
 	ID string
 	// Kind is the transport class.
 	Kind Kind
+	// IP is the identity's public egress IP, used for DNSBL and reverse-DNS
+	// audits. Optional; audits are skipped for identities without one.
+	IP string
 	// HELO is the EHLO/HELO name presented to destinations. Its forward and
 	// reverse DNS should match the egress IP for good reputation.
 	HELO string
