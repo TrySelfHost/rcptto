@@ -77,6 +77,8 @@ func run() error {
 		}},
 	})
 
+	policySet := policy.Default()
+
 	svc := verifier.New(verifier.Config{
 		Pipeline: pipeline.New(pipeline.Config{}),
 		Engine: builtin.New(builtin.Config{
@@ -87,7 +89,7 @@ func run() error {
 		Egress: egressMgr,
 		Sink:   egressMgr,
 		Cache:  resultCache,
-		Policy: policy.Default(),
+		Policy: policySet,
 	})
 
 	runner := jobs.New(jobs.Config{
@@ -96,8 +98,14 @@ func run() error {
 	})
 
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           api.New(api.Config{Verifier: svc, Jobs: runner, APIKeys: apiKeys}).Handler(),
+		Addr: addr,
+		Handler: api.New(api.Config{
+			Verifier: svc,
+			Jobs:     runner,
+			Egress:   egressAdapter{egressMgr},
+			Policy:   policyAdapter{policySet},
+			APIKeys:  apiKeys,
+		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -134,6 +142,42 @@ func run() error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// egressAdapter satisfies api.Egress by translating egress.Manager's richer
+// types into the API's plain-string wire shapes, keeping internal/api free of
+// a dependency on internal/egress.
+type egressAdapter struct{ mgr *egress.Manager }
+
+func (a egressAdapter) Identities() []api.EgressIdentity {
+	infos := a.mgr.Identities()
+	out := make([]api.EgressIdentity, len(infos))
+	for i, info := range infos {
+		out[i] = api.EgressIdentity{ID: info.ID, IP: info.IP, State: string(info.State), Reason: info.Reason}
+	}
+	return out
+}
+
+func (a egressAdapter) Quarantine(id, reason string) { a.mgr.Quarantine(id, reason) }
+func (a egressAdapter) Enable(id string)             { a.mgr.Enable(id) }
+func (a egressAdapter) Disable(id, reason string)    { a.mgr.Disable(id, reason) }
+
+// policyAdapter satisfies api.Policy by translating policy.Set's typed Strategy
+// into the API's plain strings, keeping internal/api free of a dependency on
+// internal/policy.
+type policyAdapter struct{ set *policy.Set }
+
+func (a policyAdapter) List() []api.PolicyEntry {
+	entries := a.set.List()
+	out := make([]api.PolicyEntry, len(entries))
+	for i, e := range entries {
+		out[i] = api.PolicyEntry{Key: e.Key, Strategy: string(e.Rule.Strategy), Reason: e.Rule.Reason}
+	}
+	return out
+}
+
+func (a policyAdapter) Set(key, strategy, reason string) {
+	a.set.Set(key, policy.Rule{Strategy: policy.Strategy(strategy), Reason: reason})
 }
 
 func getenv(key, def string) string {

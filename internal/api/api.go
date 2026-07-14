@@ -24,6 +24,12 @@ type Config struct {
 	Verifier Verifier
 	// Jobs handles bulk verification. Optional; when nil, /v1/jobs returns 501.
 	Jobs Jobs
+	// Egress exposes the reputation manager for admin inspection/control.
+	// Optional; when nil, /v1/admin/egress returns 501.
+	Egress Egress
+	// Policy exposes the provider-policy engine for admin inspection/control.
+	// Optional; when nil, /v1/admin/policies returns 501.
+	Policy Policy
 	// APIKeys, when non-empty, are the accepted X-API-Key values for /v1/*
 	// routes. When empty, /v1 is open (development mode).
 	APIKeys []string
@@ -33,6 +39,8 @@ type Config struct {
 type Server struct {
 	verifier Verifier
 	jobs     Jobs
+	egress   Egress
+	policy   Policy
 	apiKeys  map[string]struct{}
 }
 
@@ -47,7 +55,7 @@ func New(cfg Config) *Server {
 			keys[k] = struct{}{}
 		}
 	}
-	return &Server{verifier: cfg.Verifier, jobs: cfg.Jobs, apiKeys: keys}
+	return &Server{verifier: cfg.Verifier, jobs: cfg.Jobs, egress: cfg.Egress, policy: cfg.Policy, apiKeys: keys}
 }
 
 // Handler returns the composed HTTP handler with routes and middleware.
@@ -58,6 +66,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /v1/jobs/{id}/results", s.handleJobResults)
 	mux.HandleFunc("POST /v1/jobs/{id}/cancel", s.handleCancelJob)
+	mux.HandleFunc("GET /v1/admin/egress", s.handleListEgress)
+	mux.HandleFunc("POST /v1/admin/egress/{id}/quarantine", s.handleQuarantineEgress)
+	mux.HandleFunc("POST /v1/admin/egress/{id}/enable", s.handleEnableEgress)
+	mux.HandleFunc("POST /v1/admin/egress/{id}/disable", s.handleDisableEgress)
+	mux.HandleFunc("GET /v1/admin/policies", s.handleListPolicies)
+	mux.HandleFunc("PUT /v1/admin/policies/{provider}", s.handleSetPolicy)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	return s.authMiddleware(mux)

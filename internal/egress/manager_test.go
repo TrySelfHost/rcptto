@@ -249,6 +249,57 @@ func TestQuarantineWithReason(t *testing.T) {
 	}
 }
 
+func TestEnableRecoversFromQuarantine(t *testing.T) {
+	m := New(Config{Identities: []Spec{specWithIP("a", "1.2.3.4")}})
+	m.Quarantine("a", "manual")
+
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); !errors.Is(err, ErrNoEgress) {
+		t.Fatalf("precondition: should be quarantined, got %v", err)
+	}
+
+	m.Enable("a")
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); err != nil {
+		t.Fatalf("enabled identity should be available, got %v", err)
+	}
+	infos := m.Identities()
+	if infos[0].State != StateWarming || infos[0].Reason != "" {
+		t.Errorf("info = %+v, want warming with cleared reason", infos[0])
+	}
+}
+
+func TestDisableWithdrawsIndefinitely(t *testing.T) {
+	clk := &clock{t: time.Unix(0, 0).UTC()}
+	m := New(Config{Now: clk.now, Identities: []Spec{specWithIP("a", "1.2.3.4")}})
+	m.Disable("a", "operator withdrew")
+
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); !errors.Is(err, ErrNoEgress) {
+		t.Fatalf("disabled identity should serve nothing, got %v", err)
+	}
+
+	// Unlike quarantine, disable does not expire with time.
+	clk.advance(48 * time.Hour)
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); !errors.Is(err, ErrNoEgress) {
+		t.Errorf("disabled identity should remain withdrawn after time passes, got %v", err)
+	}
+
+	infos := m.Identities()
+	if infos[0].State != StateDisabled || infos[0].Reason != "operator withdrew" {
+		t.Errorf("info = %+v", infos[0])
+	}
+
+	m.Enable("a")
+	if _, err := m.Binding(context.Background(), taskTo("x.com")); err != nil {
+		t.Errorf("re-enabled identity should be available, got %v", err)
+	}
+}
+
+func TestEnableDisableUnknownIDIsNoop(t *testing.T) {
+	m := New(Config{Identities: []Spec{spec("a", false)}})
+	// Must not panic.
+	m.Enable("ghost")
+	m.Disable("ghost", "x")
+}
+
 func TestAuditDNSBLQuarantinesListed(t *testing.T) {
 	m := New(Config{Identities: []Spec{specWithIP("clean", "1.1.1.1"), specWithIP("dirty", "9.9.9.9")}})
 

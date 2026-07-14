@@ -13,6 +13,7 @@
 package policy
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -86,6 +87,24 @@ func (s *Set) Lookup(providerOrDomain string) Rule {
 		return normalize(r)
 	}
 	return normalize(s.defRule)
+}
+
+// Entry pairs a provider/domain key with its resolved Rule, for enumeration.
+type Entry struct {
+	Key  string
+	Rule Rule
+}
+
+// List returns every explicit rule plus the current default, sorted by key
+// with "default" last. Intended for admin/observability surfaces.
+func (s *Set) List() []Entry {
+	out := make([]Entry, 0, len(s.rules)+1)
+	for k, r := range s.rules {
+		out = append(out, Entry{Key: k, Rule: normalize(r)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	out = append(out, Entry{Key: "default", Rule: normalize(s.defRule)})
+	return out
 }
 
 // Set installs or replaces a single rule at runtime (hot-reload/admin edit).

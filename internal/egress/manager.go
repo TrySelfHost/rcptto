@@ -210,6 +210,36 @@ func (m *Manager) Identities() []IdentityInfo {
 	return out
 }
 
+// Enable clears any quarantine/disable on an identity, returning it to warming
+// (never straight to active, matching the normal recovery path). Unknown ids
+// are ignored. Intended for administrative override.
+func (m *Manager) Enable(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec := m.records[id]
+	if rec == nil {
+		return
+	}
+	rec.state = StateWarming
+	rec.warmupStage = 0
+	rec.blockStreak = 0
+	rec.quarantineReason = ""
+}
+
+// Disable administratively withdraws an identity indefinitely, until Enable is
+// called. Unlike Quarantine, Disable has no automatic recovery. Unknown ids are
+// ignored.
+func (m *Manager) Disable(id, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec := m.records[id]
+	if rec == nil {
+		return
+	}
+	rec.state = StateDisabled
+	rec.quarantineReason = reason
+}
+
 // Quarantine withdraws an identity for the configured cool-down, recording a
 // reason. Used by audits (DNSBL hits) and operators. Unknown ids are ignored.
 func (m *Manager) Quarantine(id, reason string) {

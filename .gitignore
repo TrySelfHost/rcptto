@@ -1,6 +1,9 @@
 # Binaries & build output
 /bin/
 /dist/
+/rcptto-server
+/rcptto-worker
+/rcptto
 *.exe
 *.test
 *.out

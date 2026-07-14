@@ -43,6 +43,34 @@ func TestCustomDefaultRule(t *testing.T) {
 	}
 }
 
+func TestListIncludesDefaultLast(t *testing.T) {
+	s := New(map[string]Rule{
+		"gmail": {Strategy: StrategySkip, Reason: "throttles probing"},
+		"yahoo": {Strategy: StrategySkip, Reason: "unreliable"},
+	})
+	entries := s.List()
+	if len(entries) != 3 { // gmail, yahoo, default
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	last := entries[len(entries)-1]
+	if last.Key != "default" || last.Rule.Strategy != StrategyProbe {
+		t.Errorf("last entry = %+v, want default/probe", last)
+	}
+	// Non-default entries are sorted by key.
+	if entries[0].Key != "gmail" || entries[1].Key != "yahoo" {
+		t.Errorf("sort order: %s, %s", entries[0].Key, entries[1].Key)
+	}
+}
+
+func TestListReflectsCustomDefault(t *testing.T) {
+	s := New(map[string]Rule{"default": {Strategy: StrategySkip, Reason: "conservative"}})
+	entries := s.List()
+	last := entries[len(entries)-1]
+	if last.Key != "default" || last.Rule.Strategy != StrategySkip {
+		t.Errorf("custom default not reflected in List(): %+v", last)
+	}
+}
+
 func TestSetHotReload(t *testing.T) {
 	s := Default()
 	if r := s.Lookup("gmail"); r.Strategy != StrategySkip {

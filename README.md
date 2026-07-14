@@ -41,8 +41,9 @@ What exists today:
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
 | [`internal/policy`](internal/policy) | Provider-policy engine — the honesty layer. Declarative probe/skip rules per destination provider, with sane defaults (Gmail/Yahoo/Microsoft/365 → skip, since probing them is unreliable and burns reputation for no signal). A skip never reaches the engine; the verdict is an honest `risky/provider_skipped`. | ✅ implemented + tested |
 | [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
+| [`internal/api/admin.go`](internal/api/admin.go) | Admin API — `GET /v1/admin/egress`, quarantine/enable/disable per identity, `GET/PUT /v1/admin/policies` — so the reputation system is inspectable and operable at runtime, not just at startup. Behind the same API-key auth as the rest of `/v1`. | ✅ implemented + tested |
 
-Coming next: an admin surface for editing provider policy and egress identities at runtime, and wiring PTR/FCrDNS audits into the reputation score. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+Coming next: wiring PTR/FCrDNS audit results into the reputation score (currently DNSBL-only), and a minimal read-only dashboard over the admin API. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -85,6 +86,15 @@ JOB=$(curl -s -X POST localhost:8080/v1/jobs \
   -d '{"emails":["a@example.com","b@example.com"]}' | jq -r .id)
 curl -s localhost:8080/v1/jobs/$JOB
 curl -s "localhost:8080/v1/jobs/$JOB/results?limit=100"
+
+# admin: inspect and control egress identities and provider policy
+curl -s localhost:8080/v1/admin/egress
+curl -s -X POST localhost:8080/v1/admin/egress/direct/quarantine \
+  -d '{"reason":"manual test"}'
+curl -s -X POST localhost:8080/v1/admin/egress/direct/enable
+curl -s localhost:8080/v1/admin/policies
+curl -s -X PUT localhost:8080/v1/admin/policies/gmail \
+  -d '{"strategy":"probe","reason":"testing on a clean IP"}'
 ```
 
 Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
