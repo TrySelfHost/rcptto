@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -115,13 +116,36 @@ func run() error {
 	root.Handle("/healthz", apiHandler)
 	root.Handle("/readyz", apiHandler)
 	if dashboardEnabled {
+		dashUser := os.Getenv("RCPTTO_DASHBOARD_USER")
+		dashPass := os.Getenv("RCPTTO_DASHBOARD_PASSWORD")
+		if (dashUser == "") != (dashPass == "") {
+			return errors.New("RCPTTO_DASHBOARD_USER and RCPTTO_DASHBOARD_PASSWORD must be set together")
+		}
+
+		var dashAuth *web.AuthConfig
+		if dashUser != "" {
+			dashAuth = &web.AuthConfig{
+				Username:     dashUser,
+				Password:     dashPass,
+				Secret:       []byte(os.Getenv("RCPTTO_SESSION_SECRET")),
+				SecureCookie: getenvBool("RCPTTO_SECURE_COOKIE", false),
+			}
+		} else {
+			// The dashboard can quarantine egress identities and rewrite
+			// provider policy, so an unauthenticated one must never face an
+			// untrusted network.
+			log.Warn("dashboard has NO authentication; bind it to localhost or set " +
+				"RCPTTO_DASHBOARD_USER and RCPTTO_DASHBOARD_PASSWORD before exposing it")
+		}
+
 		root.Handle("/", web.New(web.Config{
 			Verifier: svc,
 			Jobs:     runner,
 			Egress:   webEgressAdapter{egressMgr},
 			Policy:   webPolicyAdapter{policySet},
+			Auth:     dashAuth,
 		}).Handler())
-		log.Info("dashboard enabled", "url", "http://localhost"+addr+"/")
+		log.Info("dashboard enabled", "url", "http://localhost"+addr+"/", "auth", dashAuth != nil)
 	}
 
 	srv := &http.Server{

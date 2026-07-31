@@ -1,0 +1,13 @@
+{{define "content-login"}}
+<div style="max-width:360px;margin:3rem auto">
+  <h1>Sign in</h1>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  <div class="card">
+    <form method="post" action="/login" class="stack">
+      <input type="text" name="username" placeholder="Username" autocomplete="username" required autofocus>
+      <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+{{end}}

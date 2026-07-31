@@ -1,0 +1,65 @@
+# Full rcpttō stack: server + Postgres.
+#
+#   cp deploy/compose/.env.example deploy/compose/.env   # then edit it
+#   docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env up -d
+#
+# By default the server binds to 127.0.0.1 only, so the dashboard is not exposed
+# to the internet. Put a reverse proxy (Caddy/nginx) in front of it for TLS
+# before publishing it — see docs/DEPLOYMENT.md.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rcptto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-rcptto}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rcptto}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - rcptto_pgdata:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: rcptto-server:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RCPTTO_ADDR: ":8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-rcptto}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rcptto}?sslmode=disable"
+
+      # SMTP identity. RCPTTO_HELO must be a real hostname whose forward DNS
+      # points at this server's public IP, and that IP's PTR record must resolve
+      # back to it. Getting this wrong is the fastest route to being blocked.
+      RCPTTO_HELO: ${RCPTTO_HELO:?RCPTTO_HELO is required, e.g. verify.example.com}
+      RCPTTO_MAIL_FROM: ${RCPTTO_MAIL_FROM:?RCPTTO_MAIL_FROM is required}
+
+      # Dashboard credentials. Required whenever the dashboard is reachable by
+      # anything other than you on localhost.
+      RCPTTO_DASHBOARD_USER: ${RCPTTO_DASHBOARD_USER:?RCPTTO_DASHBOARD_USER is required}
+      RCPTTO_DASHBOARD_PASSWORD: ${RCPTTO_DASHBOARD_PASSWORD:?RCPTTO_DASHBOARD_PASSWORD is required}
+      # Keeps dashboard sessions valid across restarts; generate with
+      #   openssl rand -base64 32
+      RCPTTO_SESSION_SECRET: ${RCPTTO_SESSION_SECRET:-}
+      # Set true once TLS terminates in front of this service.
+      RCPTTO_SECURE_COOKIE: ${RCPTTO_SECURE_COOKIE:-false}
+
+      # API keys for /v1/* (comma-separated). Leave empty to keep the JSON API open.
+      RCPTTO_API_KEYS: ${RCPTTO_API_KEYS:-}
+
+      RCPTTO_DETECT_CATCHALL: ${RCPTTO_DETECT_CATCHALL:-true}
+      RCPTTO_DNSBL_ZONES: ${RCPTTO_DNSBL_ZONES:-}
+    ports:
+      # Bound to loopback by default. Change to "8080:8080" only if you have a
+      # reverse proxy or firewall in front of it.
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  rcptto_pgdata:

@@ -1,0 +1,63 @@
+# systemd unit for rcptto-server (non-Docker deployment).
+#
+# Install:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin rcptto
+#   sudo install -m 0755 rcptto-server /usr/local/bin/rcptto-server
+#   sudo install -d -o rcptto -g rcptto /etc/rcptto
+#   sudo install -m 0640 -o root -g rcptto rcptto.env /etc/rcptto/rcptto.env
+#   sudo install -m 0644 rcptto.service /etc/systemd/system/rcptto.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rcptto
+#
+# Logs:   journalctl -u rcptto -f
+# Status: systemctl status rcptto
+
+[Unit]
+Description=rcptto SMTP email verification server
+Documentation=https://github.com/tryselfhost/rcptto
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rcptto
+Group=rcptto
+
+# Configuration lives in an environment file readable only by root and the
+# service group, since it contains the database password and dashboard
+# credentials.
+EnvironmentFile=/etc/rcptto/rcptto.env
+ExecStart=/usr/local/bin/rcptto-server
+
+Restart=on-failure
+RestartSec=5s
+
+# The server handles SIGTERM and shuts down gracefully (draining in-flight
+# requests) within 15s, so give it a little more than that.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# --- Hardening --------------------------------------------------------------
+# rcptto-server needs outbound network access (DNS + SMTP port 25) but nothing
+# else from the host: no filesystem writes, no privilege escalation, no devices.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

@@ -45,7 +45,9 @@ What exists today:
 
 | [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next: wiring PTR/FCrDNS audit results into the reputation score (currently DNSBL-only), and multi-IP egress pool support (per-identity source-IP binding + config-driven identity list). Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+Coming next: persisting egress reputation state across restarts (warm-up
+progress and quarantine currently reset on restart), wiring PTR/FCrDNS audit
+results into the reputation score, and multi-IP egress pool support. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -109,15 +111,44 @@ curl -s -X PUT localhost:8080/v1/admin/policies/gmail \
   -d '{"strategy":"probe","reason":"testing on a clean IP"}'
 ```
 
-Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
-`RCPTTO_API_KEYS` (comma-separated; when set, `/v1/*` requires an `X-API-Key`
-header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, `RCPTTO_DETECT_CATCHALL`,
-`RCPTTO_DASHBOARD` (set `false` to disable the web UI), and
-`RCPTTO_DNSBL_ZONES` (comma-separated DNSBL zones, e.g. `zen.spamhaus.org`;
-when set, egress IPs are audited against them every 15 minutes and listed IPs
-are quarantined). Note that public DNSBLs like Spamhaus refuse queries from
-shared/public resolvers — use your own resolver or a proper data feed in
-production.
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RCPTTO_ADDR` | `:8080` | Listen address. Use `127.0.0.1:8080` behind a proxy. |
+| `RCPTTO_HELO` | `localhost` | EHLO/HELO name. **Must** be a real hostname with matching forward + reverse DNS. |
+| `RCPTTO_MAIL_FROM` | `verify@localhost` | Envelope sender used in probes. |
+| `RCPTTO_API_KEYS` | *(empty)* | Comma-separated; when set, `/v1/*` requires an `X-API-Key` header. |
+| `RCPTTO_DASHBOARD` | `true` | Set `false` to serve the JSON API only. |
+| `RCPTTO_DASHBOARD_USER` | *(empty)* | Dashboard username. Must be set together with the password. |
+| `RCPTTO_DASHBOARD_PASSWORD` | *(empty)* | Dashboard password. **Without these the dashboard is unauthenticated.** |
+| `RCPTTO_SESSION_SECRET` | *(random)* | Signs dashboard session cookies. Set it so restarts don't log everyone out. |
+| `RCPTTO_SECURE_COOKIE` | `false` | Set `true` once TLS terminates in front of the server. |
+| `RCPTTO_DETECT_CATCHALL` | `true` | Probe a random local-part to detect catch-all domains. |
+| `RCPTTO_DNSBL_ZONES` | *(empty)* | Comma-separated DNSBL zones (e.g. `zen.spamhaus.org`). Egress IPs are audited every 15 min; listed IPs are quarantined. |
+| `DATABASE_URL` | *(empty)* | Postgres DSN. Falls back to in-memory storage when unset. |
+
+> **Dashboard security.** The dashboard can quarantine egress identities and
+> rewrite provider policy — treat it as admin access. Set
+> `RCPTTO_DASHBOARD_USER`/`RCPTTO_DASHBOARD_PASSWORD` before it is reachable by
+> anything other than you on localhost. The server logs a warning at startup
+> when it is left unprotected.
+>
+> Public DNSBLs like Spamhaus refuse queries from shared/public resolvers — use
+> your own resolver or a proper data feed in production.
+
+## Deploying
+
+See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for the full guide: DNS/PTR
+setup (the single highest-impact step for deliverability), Docker Compose and
+systemd deployment, reverse proxy + TLS, a security checklist, backups, and
+first-run guidance.
+
+```bash
+cp deploy/compose/.env.example deploy/compose/.env   # fill it in
+docker compose -f deploy/compose/docker-compose.yml \
+               --env-file deploy/compose/.env up -d --build
+```
 
 ### Persistence (Postgres)
 

@@ -78,22 +78,32 @@ type Config struct {
 	Jobs     Jobs     // optional; job pages return 501 when nil
 	Egress   Egress   // optional; egress page returns 501 when nil
 	Policy   Policy   // optional; policies page returns 501 when nil
+	// Auth password-protects the dashboard. When nil the dashboard is
+	// unauthenticated, which is only safe on a trusted network or behind an
+	// authenticating reverse proxy.
+	Auth *AuthConfig
 }
 
 // Server serves the dashboard.
 type Server struct {
 	cfg  Config
 	tmpl *template.Template
+	auth *auth
 }
 
-// New builds a dashboard Server. It panics if templates fail to parse or no
-// Verifier is configured — both are programmer errors, not runtime conditions.
+// New builds a dashboard Server. It panics on a nil Verifier or an invalid
+// AuthConfig — both are programmer errors; callers reading configuration from
+// the environment should validate it before constructing the Server.
 func New(cfg Config) *Server {
 	if cfg.Verifier == nil {
 		panic("web: Verifier is required")
 	}
+	a, err := newAuth(cfg.Auth)
+	if err != nil {
+		panic(err)
+	}
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
-	return &Server{cfg: cfg, tmpl: tmpl}
+	return &Server{cfg: cfg, tmpl: tmpl, auth: a}
 }
 
 // Handler returns the composed HTTP handler.
@@ -113,8 +123,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /egress/{id}/disable", s.handleEgressDisable)
 	mux.HandleFunc("GET /policies", s.handlePolicies)
 	mux.HandleFunc("POST /policies/{key}", s.handlePolicySet)
+	mux.HandleFunc("GET /login", s.handleLoginForm)
+	mux.HandleFunc("POST /login", s.handleLoginSubmit)
+	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.Handle("GET /assets/", http.FileServerFS(assetsFS))
-	return mux
+	return s.requireAuth(mux)
 }
 
 // ---- view models -----------------------------------------------------------
@@ -177,9 +190,14 @@ func (s *Server) renderPage(w http.ResponseWriter, title, contentTemplate string
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	page := struct {
-		Title   string
-		Content template.HTML
-	}{Title: title, Content: template.HTML(buf.String())}
+		Title       string
+		Content     template.HTML
+		AuthEnabled bool
+	}{
+		Title:       title,
+		Content:     template.HTML(buf.String()),
+		AuthEnabled: s.auth != nil,
+	}
 	if err := s.tmpl.ExecuteTemplate(w, "layout", page); err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 	}
