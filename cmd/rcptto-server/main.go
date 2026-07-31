@@ -55,6 +55,7 @@ func run() error {
 	var (
 		resultCache store.ResultStore = memory.NewResultStore()
 		jobStore    store.JobStore    = memory.NewJobStore()
+		egressStore store.EgressStore = memory.NewEgressStore()
 	)
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, err := postgres.Open(context.Background(), dsn)
@@ -66,12 +67,14 @@ func run() error {
 		}
 		resultCache = postgres.NewResultStore(db)
 		jobStore = postgres.NewJobStore(db)
+		egressStore = postgres.NewEgressStore(db)
 		log.Info("using postgres store")
 	} else {
 		log.Info("using in-memory store (set DATABASE_URL for persistence)")
 	}
 
 	egressMgr := egress.New(egress.Config{
+		Store: egressStore,
 		Identities: []egress.Spec{{
 			ID:        "direct",
 			Kind:      egress.KindLocalIP,
@@ -80,6 +83,16 @@ func run() error {
 			Transport: egress.DirectTransport{},
 		}},
 	})
+
+	// Restore previously earned reputation. Without this, every restart would
+	// reset a multi-day warm-up to day zero and silently un-quarantine an
+	// identity that was withdrawn for a good reason.
+	if states, err := egressStore.LoadEgress(context.Background()); err != nil {
+		log.Warn("could not restore egress reputation; starting from configured defaults", "err", err)
+	} else if len(states) > 0 {
+		egressMgr.Restore(states)
+		log.Info("restored egress reputation", "identities", len(states))
+	}
 
 	policySet := policy.Default()
 
@@ -167,6 +180,15 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Persist egress reputation periodically and once more on shutdown.
+	persistDone := make(chan struct{})
+	go func() {
+		defer close(persistDone)
+		egressMgr.PersistLoop(ctx, 30*time.Second, func(err error) {
+			log.Warn("persisting egress reputation failed", "err", err)
+		})
+	}()
+
 	// Optional background DNSBL auditing of egress identities, tied to the
 	// server lifecycle.
 	if zones := splitAndTrim(os.Getenv("RCPTTO_DNSBL_ZONES")); len(zones) > 0 {
@@ -195,6 +217,15 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
+
+	// Wait for the final reputation flush so accumulated warm-up and quarantine
+	// state is not lost on exit.
+	select {
+	case <-persistDone:
+	case <-time.After(15 * time.Second):
+		log.Warn("timed out waiting for egress reputation to persist")
+	}
+
 	log.Info("stopped")
 	return nil
 }

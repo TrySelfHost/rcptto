@@ -32,7 +32,7 @@ func testDB(t *testing.T) *sql.DB {
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `TRUNCATE result_cache, job_results, jobs RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.ExecContext(ctx, `TRUNCATE result_cache, job_results, jobs, egress_state RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
@@ -125,5 +125,73 @@ func TestJobStoreNotFound(t *testing.T) {
 	}
 	if err := js.SetStatus(ctx, "nope", store.JobCanceled); !errors.Is(err, store.ErrJobNotFound) {
 		t.Errorf("SetStatus: %v", err)
+	}
+}
+
+func TestEgressStoreRoundTrip(t *testing.T) {
+	es := NewEgressStore(testDB(t))
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	in := []store.EgressState{{
+		ID:               "eg_1",
+		State:            "quarantined",
+		WarmupStage:      2,
+		UsedToday:        37,
+		LastReset:        now,
+		BlockStreak:      5,
+		QuarantinedUntil: now.Add(time.Hour),
+		QuarantineReason: "dnsbl:zen.spamhaus.org",
+		Health:           map[string]float64{"gmail": 0.25, "custom": 0.9},
+	}}
+	if err := es.SaveEgress(ctx, in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	out, err := es.LoadEgress(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("loaded %d states, want 1", len(out))
+	}
+	got := out[0]
+	if got.ID != "eg_1" || got.State != "quarantined" || got.WarmupStage != 2 {
+		t.Errorf("state mismatch: %+v", got)
+	}
+	if got.QuarantineReason != "dnsbl:zen.spamhaus.org" {
+		t.Errorf("reason = %q", got.QuarantineReason)
+	}
+	if got.Health["gmail"] != 0.25 {
+		t.Errorf("health not preserved: %+v", got.Health)
+	}
+	if !got.QuarantinedUntil.Equal(now.Add(time.Hour)) {
+		t.Errorf("quarantinedUntil = %v, want %v", got.QuarantinedUntil, now.Add(time.Hour))
+	}
+}
+
+func TestEgressStoreUpsert(t *testing.T) {
+	es := NewEgressStore(testDB(t))
+	ctx := context.Background()
+
+	_ = es.SaveEgress(ctx, []store.EgressState{{ID: "eg_1", State: "active"}})
+	_ = es.SaveEgress(ctx, []store.EgressState{{ID: "eg_1", State: "quarantined"}})
+
+	out, err := es.LoadEgress(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("upsert produced %d rows, want 1", len(out))
+	}
+	if out[0].State != "quarantined" {
+		t.Errorf("state = %q, want the updated value", out[0].State)
+	}
+}
+
+func TestEgressStoreEmptySaveIsNoop(t *testing.T) {
+	es := NewEgressStore(testDB(t))
+	if err := es.SaveEgress(context.Background(), nil); err != nil {
+		t.Errorf("empty save should be a no-op, got %v", err)
 	}
 }

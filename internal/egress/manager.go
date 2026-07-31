@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/egress/audit"
+	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 )
 
@@ -45,6 +46,9 @@ type Config struct {
 	WarmupStages        []int
 	// ActiveDailyCap caps an active identity's daily probes; 0 means unlimited.
 	ActiveDailyCap int
+	// Store persists reputation state across restarts. Optional; without it,
+	// warm-up progress and quarantine reset every time the process restarts.
+	Store store.EgressStore
 }
 
 // Manager owns the egress pool and its reputation state.
@@ -58,9 +62,12 @@ type Manager struct {
 	warmupStages        []int
 	activeDailyCap      int
 
+	store store.EgressStore
+
 	mu      sync.Mutex
 	records map[string]*record
 	order   []string
+	dirty   bool
 }
 
 type record struct {
@@ -87,6 +94,7 @@ func New(cfg Config) *Manager {
 		quarantineCooldown:  cfg.QuarantineCooldown,
 		warmupStages:        cfg.WarmupStages,
 		activeDailyCap:      cfg.ActiveDailyCap,
+		store:               cfg.Store,
 		records:             make(map[string]*record),
 	}
 	if m.now == nil {
@@ -144,6 +152,7 @@ func (m *Manager) Binding(_ context.Context, t engine.Task) (engine.EgressBindin
 		return nil, ErrNoEgress
 	}
 	best.usedToday++
+	m.dirty = true
 	return binding{
 		id:        best.spec.ID,
 		helo:      best.spec.HELO,
@@ -186,6 +195,7 @@ func (m *Manager) Emit(_ context.Context, signals []engine.Signal) {
 			rec.healthFor(dest).observe(false, m.alpha*0.5)
 			rec.circuitFor(dest).onFailure(now, m.circuitThreshold, m.circuitCooldown)
 		}
+		m.dirty = true
 	}
 }
 
@@ -224,6 +234,7 @@ func (m *Manager) Enable(id string) {
 	rec.warmupStage = 0
 	rec.blockStreak = 0
 	rec.quarantineReason = ""
+	m.dirty = true
 }
 
 // Disable administratively withdraws an identity indefinitely, until Enable is
@@ -238,6 +249,7 @@ func (m *Manager) Disable(id, reason string) {
 	}
 	rec.state = StateDisabled
 	rec.quarantineReason = reason
+	m.dirty = true
 }
 
 // Quarantine withdraws an identity for the configured cool-down, recording a
@@ -252,6 +264,7 @@ func (m *Manager) Quarantine(id, reason string) {
 	rec.state = StateQuarantined
 	rec.quarantinedUntil = m.now().Add(m.quarantineCooldown)
 	rec.quarantineReason = reason
+	m.dirty = true
 }
 
 // AuditDNSBL checks every identity's IP against the given DNSBL and quarantines
@@ -379,4 +392,121 @@ func (r *record) score(dest string) float64 {
 		return h.score
 	}
 	return 1.0 // unproven identities are optimistically eligible
+}
+
+// --- persistence -------------------------------------------------------------
+
+// Snapshot returns the serializable reputation state of every identity, for
+// persistence. Circuit breakers are deliberately excluded — they are transient
+// and re-trip quickly if the underlying problem persists.
+func (m *Manager) Snapshot() []store.EgressState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]store.EgressState, 0, len(m.order))
+	for _, id := range m.order {
+		rec := m.records[id]
+		health := make(map[string]float64, len(rec.health))
+		for dest, h := range rec.health {
+			health[dest] = h.score
+		}
+		out = append(out, store.EgressState{
+			ID:               id,
+			State:            string(rec.state),
+			WarmupStage:      rec.warmupStage,
+			UsedToday:        rec.usedToday,
+			LastReset:        rec.lastReset,
+			BlockStreak:      rec.blockStreak,
+			QuarantinedUntil: rec.quarantinedUntil,
+			QuarantineReason: rec.quarantineReason,
+			Health:           health,
+		})
+	}
+	return out
+}
+
+// Restore applies previously persisted state to the configured pool.
+//
+// Only identities present in the current configuration are restored; persisted
+// state for an identity that has since been removed is ignored, and a newly
+// added identity keeps its configured starting state. This makes the config the
+// source of truth for *which* identities exist, and the store the source of
+// truth for *what reputation they have earned*.
+func (m *Manager) Restore(states []store.EgressState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, st := range states {
+		rec := m.records[st.ID]
+		if rec == nil {
+			continue
+		}
+		rec.state = State(st.State)
+		rec.warmupStage = st.WarmupStage
+		rec.usedToday = st.UsedToday
+		rec.blockStreak = st.BlockStreak
+		rec.quarantinedUntil = st.QuarantinedUntil
+		rec.quarantineReason = st.QuarantineReason
+		if !st.LastReset.IsZero() {
+			rec.lastReset = st.LastReset
+		}
+		for dest, score := range st.Health {
+			rec.health[dest] = &health{score: score}
+		}
+	}
+	m.dirty = true
+}
+
+// Persist writes the current reputation state to the configured store. It is a
+// no-op when no store is configured.
+func (m *Manager) Persist(ctx context.Context) error {
+	if m.store == nil {
+		return nil
+	}
+	states := m.Snapshot()
+	if err := m.store.SaveEgress(ctx, states); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.dirty = false
+	m.mu.Unlock()
+	return nil
+}
+
+// PersistLoop periodically writes reputation state to the configured store
+// until ctx is canceled, then performs a final write so a graceful shutdown
+// does not lose the most recent changes. It is a no-op without a store.
+func (m *Manager) PersistLoop(ctx context.Context, interval time.Duration, onErr func(error)) {
+	if m.store == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	report := func(err error) {
+		if err != nil && onErr != nil {
+			onErr(err)
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Final write on shutdown, with a fresh context since ctx is done.
+			flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			report(m.Persist(flushCtx))
+			cancel()
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			dirty := m.dirty
+			m.mu.Unlock()
+			if dirty {
+				report(m.Persist(ctx))
+			}
+		}
+	}
 }

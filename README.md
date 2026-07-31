@@ -34,7 +34,7 @@ What exists today:
 | [`internal/pipeline`](internal/pipeline) | The verification funnel: syntax → normalize → disposable → role → free → MX. Returns a terminal verdict or a "needs-probe" task. Cheap, in-memory checks run before the one network-bound (DNS) stage. | ✅ implemented + tested |
 | [`pkg/engine/builtin`](pkg/engine/builtin) | The default SMTP engine (the probe stage): native `net/textproto` client, MX failover, catch-all detection, and careful classification of mailbox-not-found vs. policy-block vs. greylisting. MIT/Apache-clean, linked in-process. | ✅ implemented + tested |
 | [`internal/store`](internal/store) + [`memory`](internal/store/memory) | Persistence ports (`ResultStore`, `JobStore`) with in-memory adapters — the zero-dependency default. | ✅ implemented + tested |
-| [`internal/store/postgres`](internal/store/postgres) | Durable Postgres adapters behind the same ports, with an embedded, self-applying migration runner. Pure `database/sql` (driver chosen in `main`). | ✅ implemented + CI integration-tested |
+| [`internal/store/postgres`](internal/store/postgres) | Durable Postgres adapters behind the same ports (results, jobs, **egress reputation**), with an embedded, self-applying migration runner. Pure `database/sql` (driver chosen in `main`). | ✅ implemented + CI integration-tested |
 | [`internal/verifier`](internal/verifier) | Composition root: runs the funnel, probes survivors through an egress identity, applies the result cache, and merges funnel + SMTP findings. Includes the `EgressProvider` seam for the future reputation manager. | ✅ implemented + tested |
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
@@ -46,9 +46,9 @@ What exists today:
 
 | [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next: persisting egress reputation state across restarts (warm-up
-progress and quarantine currently reset on restart), Prometheus metrics, and
-multi-IP egress pool support. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+Coming next: Prometheus metrics, multi-IP egress pool support (per-identity
+source-IP binding + a config-driven identity list), and wiring PTR/FCrDNS audit
+results into the reputation score. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -175,6 +175,13 @@ against a real database:
 ```bash
 go test -tags=integration ./internal/store/postgres/...   # needs DATABASE_URL
 ```
+
+**Egress reputation is persisted too.** Warm-up progress, quarantine state, and
+per-destination health scores are written every 30 seconds and once more on
+graceful shutdown, then restored at startup. Without `DATABASE_URL` this state
+lives in memory and is lost on restart — which means a multi-day warm-up
+restarts at day zero and a quarantined IP silently returns to service. Use
+Postgres for any deployment that accumulates real reputation.
 
 > **Note on port 25:** live SMTP verification requires outbound port 25, which
 > most residential ISPs and cloud providers block by default. On such a host the
