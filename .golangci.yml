@@ -4,6 +4,7 @@ version: "2"
 
 run:
   timeout: 5m
+  modules-download-mode: vendor
 
 linters:
   default: standard   # errcheck, govet, ineffassign, staticcheck, unused
@@ -24,6 +25,8 @@ linters:
     misspell:
       locale: US
   exclusions:
+    paths:
+      - vendor
     rules:
       - path: _test\.go
         linters: [errcheck, bodyclose]

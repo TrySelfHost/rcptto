@@ -58,7 +58,7 @@ Two principles worth knowing up front:
 
 ## Requirements
 
-- **Go 1.26+** (the module currently declares `go 1.22` only so it builds in a constrained CI sandbox — bump it to `1.26` locally; the code is plain standard library).
+- **Go 1.22+** (the module targets `go 1.22` for broad toolchain compatibility; a newer installed Go, e.g. 1.26, builds it without any changes).
 
 ## Getting started (contributors)
 
@@ -133,8 +133,9 @@ go run ./cmd/rcptto-server        # now durable; auto-migrates on boot
 
 The Postgres adapters live in `internal/store/postgres` and implement the same
 `ResultStore`/`JobStore` ports as the in-memory ones — nothing else in the
-codebase changes. The SQL driver (`pgx`) is imported only in `main`, so run
-`go mod tidy` once after pulling this in to fetch it. Integration tests run
+codebase changes. The SQL driver (`pgx`) is already vendored (see
+[`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md)), so no `go mod tidy` or network
+access is needed to build with Postgres support. Integration tests run
 against a real database:
 
 ```bash
