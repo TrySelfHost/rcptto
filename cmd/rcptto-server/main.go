@@ -24,6 +24,7 @@ import (
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/policy"
+	"github.com/tryselfhost/rcptto/internal/ratelimit"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/internal/store/postgres"
@@ -82,6 +83,14 @@ func run() error {
 
 	policySet := policy.Default()
 
+	// Pace probes per destination mail server. Without this, a bulk job
+	// concentrated on one domain hammers that domain's MX at full worker
+	// concurrency — a reliable way to get an egress IP blocked.
+	limiter := ratelimit.New(ratelimit.Config{
+		Rate:  getenvFloat("RCPTTO_PROBE_RATE", 1),
+		Burst: getenvFloat("RCPTTO_PROBE_BURST", 5),
+	})
+
 	svc := verifier.New(verifier.Config{
 		Pipeline: pipeline.New(pipeline.Config{}),
 		Engine: builtin.New(builtin.Config{
@@ -89,10 +98,11 @@ func run() error {
 			MailFrom:       mailFrom,
 			DetectCatchAll: detectCatchAll,
 		}),
-		Egress: egressMgr,
-		Sink:   egressMgr,
-		Cache:  resultCache,
-		Policy: policySet,
+		Egress:  egressMgr,
+		Sink:    egressMgr,
+		Cache:   resultCache,
+		Policy:  policySet,
+		Limiter: limiter,
 	})
 
 	runner := jobs.New(jobs.Config{
@@ -276,6 +286,18 @@ func getenvBool(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+func getenvFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return def
+	}
+	return f
 }
 
 // runDNSBLAudits periodically checks egress identities against the configured

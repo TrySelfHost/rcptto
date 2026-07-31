@@ -39,6 +39,7 @@ What exists today:
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
+| [`internal/ratelimit`](internal/ratelimit) | Per-destination token-bucket pacing for SMTP probes, keyed on the destination MX host. Prevents a bulk job concentrated on one domain from hammering that domain's mail server at full worker concurrency. Throttled probes defer honestly rather than blocking a worker. | ✅ implemented + tested |
 | [`internal/policy`](internal/policy) | Provider-policy engine — the honesty layer. Declarative probe/skip rules per destination provider, with sane defaults (Gmail/Yahoo/Microsoft/365 → skip, since probing them is unreliable and burns reputation for no signal). A skip never reaches the engine; the verdict is an honest `risky/provider_skipped`. | ✅ implemented + tested |
 | [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
 | [`internal/api/admin.go`](internal/api/admin.go) | Admin API — `GET /v1/admin/egress`, quarantine/enable/disable per identity, `GET/PUT /v1/admin/policies` — so the reputation system is inspectable and operable at runtime, not just at startup. Behind the same API-key auth as the rest of `/v1`. | ✅ implemented + tested |
@@ -46,8 +47,8 @@ What exists today:
 | [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
 Coming next: persisting egress reputation state across restarts (warm-up
-progress and quarantine currently reset on restart), wiring PTR/FCrDNS audit
-results into the reputation score, and multi-IP egress pool support. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+progress and quarantine currently reset on restart), Prometheus metrics, and
+multi-IP egress pool support. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -125,6 +126,8 @@ curl -s -X PUT localhost:8080/v1/admin/policies/gmail \
 | `RCPTTO_SESSION_SECRET` | *(random)* | Signs dashboard session cookies. Set it so restarts don't log everyone out. |
 | `RCPTTO_SECURE_COOKIE` | `false` | Set `true` once TLS terminates in front of the server. |
 | `RCPTTO_DETECT_CATCHALL` | `true` | Probe a random local-part to detect catch-all domains. |
+| `RCPTTO_PROBE_RATE` | `1` | Sustained SMTP probes per second **per destination mail server**. |
+| `RCPTTO_PROBE_BURST` | `5` | Probes allowed back-to-back to one destination after an idle period. |
 | `RCPTTO_DNSBL_ZONES` | *(empty)* | Comma-separated DNSBL zones (e.g. `zen.spamhaus.org`). Egress IPs are audited every 15 min; listed IPs are quarantined. |
 | `DATABASE_URL` | *(empty)* | Postgres DSN. Falls back to in-memory storage when unset. |
 

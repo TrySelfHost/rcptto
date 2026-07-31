@@ -2,11 +2,14 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/policy"
+	"github.com/tryselfhost/rcptto/internal/ratelimit"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 	"github.com/tryselfhost/rcptto/pkg/engine/mock"
@@ -175,5 +178,99 @@ func TestCacheHitSkipsSecondProbe(t *testing.T) {
 	}
 	if spy.calls != 1 {
 		t.Errorf("engine should be probed once, calls=%d", spy.calls)
+	}
+}
+
+func TestRateLimiterPacesProbes(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	// Burst of 1 at 1/sec: the first probe passes, later ones must wait.
+	limiter := ratelimit.New(ratelimit.Config{Rate: 1, Burst: 1})
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy, Limiter: limiter})
+	ctx := context.Background()
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		// Distinct addresses so the result cache never short-circuits the probe.
+		email := fmt.Sprintf("user%d@example.com", i)
+		if _, err := svc.Verify(ctx, email); err != nil {
+			t.Fatalf("verify %d: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	if spy.calls != 3 {
+		t.Fatalf("engine calls = %d, want 3", spy.calls)
+	}
+	// Three probes at 1/sec with burst 1 means roughly two seconds of pacing.
+	if elapsed < 1500*time.Millisecond {
+		t.Errorf("probes completed in %v; expected pacing to slow them down", elapsed)
+	}
+}
+
+func TestRateLimitedBeyondMaxWaitDefers(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	// A limiter that refuses almost immediately: burst 1, and any queued wait
+	// exceeds the 1ns maximum.
+	limiter := ratelimit.New(ratelimit.Config{Rate: 1, Burst: 1, MaxWait: time.Nanosecond})
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy, Limiter: limiter})
+	ctx := context.Background()
+
+	if _, err := svc.Verify(ctx, "first@example.com"); err != nil {
+		t.Fatalf("first verify: %v", err)
+	}
+	v, err := svc.Verify(ctx, "second@example.com")
+	if err != nil {
+		t.Fatalf("second verify: %v", err)
+	}
+	if v.Status != verdict.StatusUnknown || v.SubStatus != verdict.SubTemporaryFailure {
+		t.Fatalf("got (%s,%s), want unknown/temporary_failure when throttled", v.Status, v.SubStatus)
+	}
+	if spy.calls != 1 {
+		t.Errorf("engine calls = %d, want 1 (second probe must be deferred, not sent)", spy.calls)
+	}
+	// Funnel findings must survive on the deferred verdict.
+	if !v.Checks.Syntax.Valid || !v.Checks.MX.Found {
+		t.Errorf("deferred verdict lost funnel findings: %+v", v.Checks)
+	}
+}
+
+func TestDeferredResultsAreNotCached(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	limiter := ratelimit.New(ratelimit.Config{Rate: 1, Burst: 1, MaxWait: time.Nanosecond})
+	svc := New(Config{
+		Pipeline: testPipeline(), Engine: spy, Limiter: limiter,
+		Cache: memory.NewResultStore(),
+	})
+	ctx := context.Background()
+
+	_, _ = svc.Verify(ctx, "a@example.com") // consumes the burst
+	v, _ := svc.Verify(ctx, "b@example.com")
+	if v.Status != verdict.StatusUnknown {
+		t.Fatalf("expected the second probe to be deferred, got %s", v.Status)
+	}
+	// A deferred (unknown) result must not be cached, so a later retry can
+	// still produce a real verdict.
+	v2, _ := svc.Verify(ctx, "b@example.com")
+	if v2.Cached {
+		t.Error("deferred results must never be cached")
+	}
+}
+
+func TestNoLimiterMeansNoThrottling(t *testing.T) {
+	spy := &spyEngine{inner: mock.New()}
+	svc := New(Config{Pipeline: testPipeline(), Engine: spy}) // no Limiter
+	ctx := context.Background()
+
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		if _, err := svc.Verify(ctx, fmt.Sprintf("u%d@example.com", i)); err != nil {
+			t.Fatalf("verify %d: %v", i, err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("unlimited verifier took %v; should not be paced", elapsed)
+	}
+	if spy.calls != 5 {
+		t.Errorf("engine calls = %d, want 5", spy.calls)
 	}
 }

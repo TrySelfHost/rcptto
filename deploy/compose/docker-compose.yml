@@ -55,6 +55,8 @@ services:
       RCPTTO_API_KEYS: ${RCPTTO_API_KEYS:-}
 
       RCPTTO_DETECT_CATCHALL: ${RCPTTO_DETECT_CATCHALL:-true}
+      RCPTTO_PROBE_RATE: ${RCPTTO_PROBE_RATE:-1}
+      RCPTTO_PROBE_BURST: ${RCPTTO_PROBE_BURST:-5}
       RCPTTO_DNSBL_ZONES: ${RCPTTO_DNSBL_ZONES:-}
     ports:
       # Bound to loopback by default. Change to "8080:8080" only if you have a

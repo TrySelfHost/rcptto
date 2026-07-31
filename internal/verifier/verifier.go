@@ -10,10 +10,12 @@ package verifier
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/policy"
+	"github.com/tryselfhost/rcptto/internal/ratelimit"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/engine"
 	"github.com/tryselfhost/rcptto/pkg/verdict"
@@ -42,7 +44,11 @@ type Config struct {
 	CacheTTL time.Duration     // defaults to 24h
 	Sink     SignalSink        // defaults to no-op
 	Policy   *policy.Set       // defaults to policy.Default()
-	Now      func() time.Time  // defaults to time.Now
+	// Limiter paces probes per destination. Optional but strongly recommended:
+	// without it, a bulk job concentrated on one domain will probe that
+	// domain's mail server at full worker concurrency.
+	Limiter *ratelimit.Limiter
+	Now     func() time.Time // defaults to time.Now
 }
 
 // Service verifies a single address end to end.
@@ -54,6 +60,7 @@ type Service struct {
 	cacheTTL time.Duration
 	sink     SignalSink
 	policy   *policy.Set
+	limiter  *ratelimit.Limiter
 	now      func() time.Time
 }
 
@@ -71,6 +78,7 @@ func New(cfg Config) *Service {
 		cacheTTL: cfg.CacheTTL,
 		sink:     cfg.Sink,
 		policy:   cfg.Policy,
+		limiter:  cfg.Limiter,
 		now:      cfg.Now,
 	}
 	if s.egress == nil {
@@ -160,9 +168,22 @@ func (s *Service) skipVerdict(res pipeline.Result, rule policy.Rule) verdict.Ver
 // When no egress identity is available (e.g. all quarantined), it returns an
 // honest deferred "unknown" rather than failing the request.
 func (s *Service) probe(ctx context.Context, res pipeline.Result) (verdict.Verdict, error) {
+	// Pace probes per destination before acquiring an egress identity, so a
+	// bulk job concentrated on one domain cannot hammer that domain's MX.
+	if s.limiter != nil {
+		if err := s.limiter.Wait(ctx, destinationKey(res)); err != nil {
+			if ctx.Err() != nil {
+				return verdict.Verdict{}, ctx.Err()
+			}
+			// Throttled beyond the acceptable wait: report an honest deferred
+			// result rather than blocking a worker on a busy destination.
+			return s.deferredVerdict(res), nil
+		}
+	}
+
 	binding, err := s.egress.Binding(ctx, res.Task)
 	if err != nil {
-		return s.noEgressVerdict(res), nil
+		return s.deferredVerdict(res), nil
 	}
 	ev, signals, err := s.engine.Verify(ctx, res.Task, binding)
 	if err != nil {
@@ -172,9 +193,22 @@ func (s *Service) probe(ctx context.Context, res pipeline.Result) (verdict.Verdi
 	return merge(res, ev), nil
 }
 
-// noEgressVerdict builds a deferred unknown verdict that preserves the funnel's
-// findings, used when the egress pool cannot currently supply an identity.
-func (s *Service) noEgressVerdict(res pipeline.Result) verdict.Verdict {
+// destinationKey identifies the mail server being probed, for rate-limiting
+// purposes. The primary MX host is preferred over the domain, since many
+// domains can share one mail server and it is that server we must not overload.
+func destinationKey(res pipeline.Result) string {
+	if len(res.MX) > 0 && res.MX[0] != "" {
+		return strings.ToLower(res.MX[0])
+	}
+	return strings.ToLower(res.Task.Domain)
+}
+
+// deferredVerdict builds an honest deferred "unknown" verdict that preserves
+// the funnel's findings. It is used when a probe cannot be attempted right now
+// — either the egress pool has no eligible identity, or the destination is
+// rate-limited beyond the acceptable wait. Deferred results are never cached,
+// so the address is re-evaluated on the next attempt.
+func (s *Service) deferredVerdict(res pipeline.Result) verdict.Verdict {
 	return verdict.Verdict{
 		Email:      res.Task.Email,
 		Normalized: res.Task.Normalized,
