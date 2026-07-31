@@ -27,6 +27,7 @@ import (
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/internal/store/postgres"
 	"github.com/tryselfhost/rcptto/internal/verifier"
+	"github.com/tryselfhost/rcptto/internal/web"
 	"github.com/tryselfhost/rcptto/pkg/engine/builtin"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
@@ -47,6 +48,7 @@ func run() error {
 	mailFrom := getenv("RCPTTO_MAIL_FROM", "verify@localhost")
 	apiKeys := splitAndTrim(os.Getenv("RCPTTO_API_KEYS"))
 	detectCatchAll := getenvBool("RCPTTO_DETECT_CATCHALL", true)
+	dashboardEnabled := getenvBool("RCPTTO_DASHBOARD", true)
 
 	var (
 		resultCache store.ResultStore = memory.NewResultStore()
@@ -97,15 +99,34 @@ func run() error {
 		Verifier: svc,
 	})
 
-	srv := &http.Server{
-		Addr: addr,
-		Handler: api.New(api.Config{
+	apiHandler := api.New(api.Config{
+		Verifier: svc,
+		Jobs:     runner,
+		Egress:   egressAdapter{egressMgr},
+		Policy:   policyAdapter{policySet},
+		APIKeys:  apiKeys,
+	}).Handler()
+
+	// The JSON API owns /v1/* and the health endpoints; the dashboard owns
+	// everything else (/, /jobs, /egress, /policies, /assets). Composing them
+	// under one mux keeps a single listener and a single binary.
+	root := http.NewServeMux()
+	root.Handle("/v1/", apiHandler)
+	root.Handle("/healthz", apiHandler)
+	root.Handle("/readyz", apiHandler)
+	if dashboardEnabled {
+		root.Handle("/", web.New(web.Config{
 			Verifier: svc,
 			Jobs:     runner,
-			Egress:   egressAdapter{egressMgr},
-			Policy:   policyAdapter{policySet},
-			APIKeys:  apiKeys,
-		}).Handler(),
+			Egress:   webEgressAdapter{egressMgr},
+			Policy:   webPolicyAdapter{policySet},
+		}).Handler())
+		log.Info("dashboard enabled", "url", "http://localhost"+addr+"/")
+	}
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           root,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -177,6 +198,40 @@ func (a policyAdapter) List() []api.PolicyEntry {
 }
 
 func (a policyAdapter) Set(key, strategy, reason string) {
+	a.set.Set(key, policy.Rule{Strategy: policy.Strategy(strategy), Reason: reason})
+}
+
+// webEgressAdapter satisfies web.Egress, mirroring egressAdapter for the
+// dashboard's own narrow interface (the web package deliberately does not
+// import internal/egress).
+type webEgressAdapter struct{ mgr *egress.Manager }
+
+func (a webEgressAdapter) Identities() []web.EgressIdentity {
+	infos := a.mgr.Identities()
+	out := make([]web.EgressIdentity, len(infos))
+	for i, info := range infos {
+		out[i] = web.EgressIdentity{ID: info.ID, IP: info.IP, State: string(info.State), Reason: info.Reason}
+	}
+	return out
+}
+
+func (a webEgressAdapter) Quarantine(id, reason string) { a.mgr.Quarantine(id, reason) }
+func (a webEgressAdapter) Enable(id string)             { a.mgr.Enable(id) }
+func (a webEgressAdapter) Disable(id, reason string)    { a.mgr.Disable(id, reason) }
+
+// webPolicyAdapter satisfies web.Policy, mirroring policyAdapter.
+type webPolicyAdapter struct{ set *policy.Set }
+
+func (a webPolicyAdapter) List() []web.PolicyEntry {
+	entries := a.set.List()
+	out := make([]web.PolicyEntry, len(entries))
+	for i, e := range entries {
+		out[i] = web.PolicyEntry{Key: e.Key, Strategy: string(e.Rule.Strategy), Reason: e.Rule.Reason}
+	}
+	return out
+}
+
+func (a webPolicyAdapter) Set(key, strategy, reason string) {
 	a.set.Set(key, policy.Rule{Strategy: policy.Strategy(strategy), Reason: reason})
 }
 

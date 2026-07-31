@@ -1,0 +1,20 @@
+{{define "title-jobs"}}rcpttō — Jobs{{end}}
+
+{{define "content-jobs"}}
+<h1>Jobs</h1>
+{{if .Jobs}}
+<table>
+  <tr><th>ID</th><th>Status</th><th>Progress</th><th>Created</th></tr>
+  {{range .Jobs}}
+  <tr>
+    <td class="mono"><a href="/jobs/{{.ID}}" hx-boost="true">{{.ID}}</a></td>
+    <td><span class="badge b-{{.StatusClass}}">{{.Status}}</span></td>
+    <td>{{.Done}} / {{.Total}}</td>
+    <td class="muted">{{.CreatedAtStr}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<p class="muted">No jobs yet. Submit a bulk job from the <a href="/" hx-boost="true">verify</a> page.</p>
+{{end}}
+{{end}}

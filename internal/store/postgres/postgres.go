@@ -222,6 +222,40 @@ func (s *JobStore) SetStatus(ctx context.Context, jobID string, status store.Job
 	return nil
 }
 
+// ListJobs implements store.JobStore, returning jobs newest-first.
+func (s *JobStore) ListJobs(ctx context.Context, limit int) ([]store.Job, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, status, total, done, created_at, completed_at
+		   FROM jobs ORDER BY created_at DESC LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]store.Job, 0, limit)
+	for rows.Next() {
+		var job store.Job
+		var status string
+		var completed sql.NullTime
+		if err := rows.Scan(&job.ID, &status, &job.Total, &job.Done, &job.CreatedAt, &completed); err != nil {
+			return nil, err
+		}
+		job.Status = store.JobStatus(status)
+		if completed.Valid {
+			job.CompletedAt = &completed.Time
+		}
+		out = append(out, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // scanJob scans a job row, translating no-rows into ErrJobNotFound.
 func scanJob(row interface{ Scan(...any) error }) (store.Job, error) {
 	var job store.Job

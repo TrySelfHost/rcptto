@@ -43,7 +43,9 @@ What exists today:
 | [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
 | [`internal/api/admin.go`](internal/api/admin.go) | Admin API — `GET /v1/admin/egress`, quarantine/enable/disable per identity, `GET/PUT /v1/admin/policies` — so the reputation system is inspectable and operable at runtime, not just at startup. Behind the same API-key auth as the rest of `/v1`. | ✅ implemented + tested |
 
-Coming next: wiring PTR/FCrDNS audit results into the reputation score (currently DNSBL-only), and a minimal read-only dashboard over the admin API. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
+| [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
+
+Coming next: wiring PTR/FCrDNS audit results into the reputation score (currently DNSBL-only), and multi-IP egress pool support (per-identity source-IP binding + config-driven identity list). Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
 
@@ -73,7 +75,17 @@ make help    # list all targets
 
 ```bash
 go run ./cmd/rcptto-server        # listens on :8080 by default
+```
 
+Then open **<http://localhost:8080/>** for the dashboard: verify a single
+address, submit a bulk job and watch it progress live, inspect and control
+egress identities (quarantine / enable / disable), and edit provider policy —
+all server-rendered with htmx, embedded in the binary. Set
+`RCPTTO_DASHBOARD=false` to serve the JSON API only.
+
+The same functionality is available over the JSON API:
+
+```bash
 # in another shell:
 curl -s localhost:8080/healthz
 curl -s -X POST localhost:8080/v1/verify \
@@ -99,7 +111,8 @@ curl -s -X PUT localhost:8080/v1/admin/policies/gmail \
 
 Configuration is via environment variables: `RCPTTO_ADDR` (default `:8080`),
 `RCPTTO_API_KEYS` (comma-separated; when set, `/v1/*` requires an `X-API-Key`
-header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, `RCPTTO_DETECT_CATCHALL`, and
+header), `RCPTTO_HELO`, `RCPTTO_MAIL_FROM`, `RCPTTO_DETECT_CATCHALL`,
+`RCPTTO_DASHBOARD` (set `false` to disable the web UI), and
 `RCPTTO_DNSBL_ZONES` (comma-separated DNSBL zones, e.g. `zen.spamhaus.org`;
 when set, egress IPs are audited against them every 15 minutes and listed IPs
 are quarantined). Note that public DNSBLs like Spamhaus refuse queries from

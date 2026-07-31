@@ -1,0 +1,28 @@
+{{define "verdict-result"}}
+<div class="stack">
+  <div>
+    <span class="badge b-{{.Status}}">{{.Status}}</span>
+    <span class="muted"> · {{.SubStatus}}</span>
+    {{if .Cached}}<span class="muted"> · cached</span>{{end}}
+  </div>
+  <table>
+    <tr><td class="muted">Email</td><td class="mono">{{.Email}}</td></tr>
+    <tr><td class="muted">Normalized</td><td class="mono">{{.Normalized}}</td></tr>
+    <tr><td class="muted">Provider</td><td>{{if .Provider}}{{.Provider}}{{else}}—{{end}}</td></tr>
+    <tr><td class="muted">Confidence</td><td>{{.ConfidencePct}}%</td></tr>
+    <tr><td class="muted">Syntax valid</td><td>{{.Checks.Syntax.Valid}}</td></tr>
+    <tr><td class="muted">MX found</td><td>{{.Checks.MX.Found}}</td></tr>
+    <tr><td class="muted">Catch-all</td><td>{{.Checks.CatchAll}}</td></tr>
+    <tr><td class="muted">Role account</td><td>{{.Checks.Role}}</td></tr>
+    <tr><td class="muted">Disposable</td><td>{{.Checks.Disposable}}</td></tr>
+    {{if .Checks.SMTP.Probed}}
+    <tr><td class="muted">SMTP code</td><td class="mono">{{.Checks.SMTP.Code}}</td></tr>
+    {{end}}
+    <tr><td class="muted">Engine</td><td>{{if .Engine}}{{.Engine}}{{else}}—{{end}}</td></tr>
+  </table>
+</div>
+{{end}}
+
+{{define "verdict-error"}}
+<div class="error">{{.}}</div>
+{{end}}

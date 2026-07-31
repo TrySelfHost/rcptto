@@ -16,6 +16,7 @@ import (
 type Jobs interface {
 	Submit(ctx context.Context, emails []string) (store.Job, error)
 	Get(ctx context.Context, id string) (store.Job, error)
+	List(ctx context.Context, limit int) ([]store.Job, error)
 	Results(ctx context.Context, id string, cursor, limit int) ([]verdict.Verdict, int, error)
 	Cancel(ctx context.Context, id string) error
 }

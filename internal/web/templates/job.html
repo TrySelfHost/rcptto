@@ -1,0 +1,63 @@
+{{define "job-created"}}
+<div class="stack">
+  <div><span class="muted">Job submitted:</span> <a class="mono" href="/jobs/{{.ID}}" hx-boost="true">{{.ID}}</a></div>
+  <div class="muted">{{.Total}} unique address(es) queued.</div>
+</div>
+{{end}}
+
+{{define "title-job"}}rcpttō — Job {{.Job.ID}}{{end}}
+
+{{define "content-job"}}
+<h1>Job <span class="mono">{{.Job.ID}}</span></h1>
+
+<div id="job-status" {{if .Job.Running}}hx-get="/jobs/{{.Job.ID}}/status" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
+  {{template "job-status-inner" .}}
+</div>
+{{end}}
+
+{{define "job-status-inner"}}
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <div>
+      <span class="badge b-{{.Job.StatusClass}}">{{.Job.Status}}</span>
+      <span class="muted"> · {{.Job.Done}} / {{.Job.Total}}</span>
+    </div>
+    {{if .Job.Running}}
+    <button class="danger" hx-post="/jobs/{{.Job.ID}}/cancel" hx-confirm="Cancel this job?" hx-target="#job-status" hx-swap="outerHTML">Cancel</button>
+    {{end}}
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:{{.Job.PercentDone}}%"></div></div>
+</div>
+
+{{if .Results}}
+<h2>Results ({{len .Results}}{{if .HasMore}}+{{end}})</h2>
+<table>
+  <tr><th>Email</th><th>Status</th><th>Reason</th></tr>
+  <tbody id="result-rows">{{template "job-result-rows" .Results}}</tbody>
+</table>
+<div id="load-more-wrap" style="margin-top:0.75rem">{{template "load-more-button" .}}</div>
+{{end}}
+{{end}}
+
+{{define "load-more-button"}}
+{{if .HasMore}}
+<button class="secondary" hx-get="/jobs/{{.Job.ID}}/results?cursor={{.NextCursor}}" hx-target="#result-rows" hx-swap="beforeend">Load more</button>
+{{end}}
+{{end}}
+
+{{define "job-result-rows"}}
+{{range .}}
+<tr>
+  <td class="mono">{{.Email}}</td>
+  <td><span class="badge b-{{.Status}}">{{.Status}}</span></td>
+  <td class="muted">{{.SubStatus}}</td>
+</tr>
+{{end}}
+{{end}}
+
+{{/* Response to the "Load more" click: new rows plus an out-of-band refresh of
+     the button (new cursor, or removed once exhausted). */}}
+{{define "job-result-rows-page"}}
+{{template "job-result-rows" .Results}}
+<div id="load-more-wrap" hx-swap-oob="true">{{template "load-more-button" .}}</div>
+{{end}}

@@ -57,6 +57,38 @@ func TestJobStoreNotFound(t *testing.T) {
 	}
 }
 
+func TestJobStoreListJobsNewestFirst(t *testing.T) {
+	s := NewJobStore()
+	ctx := context.Background()
+	base := time.Unix(1000, 0)
+
+	_ = s.CreateJob(ctx, store.Job{ID: "old", Total: 1, CreatedAt: base})
+	_ = s.CreateJob(ctx, store.Job{ID: "new", Total: 1, CreatedAt: base.Add(time.Hour)})
+
+	jobs, err := s.ListJobs(ctx, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(jobs) != 2 || jobs[0].ID != "new" || jobs[1].ID != "old" {
+		t.Fatalf("got %+v, want [new, old]", jobs)
+	}
+}
+
+func TestJobStoreListJobsRespectsLimit(t *testing.T) {
+	s := NewJobStore()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		_ = s.CreateJob(ctx, store.Job{ID: string(rune('a' + i)), Total: 1, CreatedAt: time.Unix(int64(i), 0)})
+	}
+	jobs, err := s.ListJobs(ctx, 2)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("got %d jobs, want 2", len(jobs))
+	}
+}
+
 func TestJobStoreResultsPagination(t *testing.T) {
 	s := NewJobStore()
 	ctx := context.Background()

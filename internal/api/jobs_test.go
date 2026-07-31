@@ -22,6 +22,7 @@ type stubJobs struct {
 
 func (s stubJobs) Submit(context.Context, []string) (store.Job, error) { return s.job, s.submit }
 func (s stubJobs) Get(context.Context, string) (store.Job, error)      { return s.job, s.get }
+func (s stubJobs) List(context.Context, int) ([]store.Job, error)      { return []store.Job{s.job}, s.get }
 func (s stubJobs) Results(context.Context, string, int, int) ([]verdict.Verdict, int, error) {
 	return s.results, s.next, s.get
 }

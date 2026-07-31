@@ -53,4 +53,8 @@ type JobStore interface {
 	// SetStatus updates the job status, setting CompletedAt for terminal states.
 	// Returns ErrJobNotFound for an unknown id.
 	SetStatus(ctx context.Context, jobID string, status JobStatus) error
+	// ListJobs returns the most recently created jobs, newest first, capped at
+	// limit (a limit <= 0 uses a sensible default). Intended for dashboards and
+	// admin views, not for high-throughput lookups.
+	ListJobs(ctx context.Context, limit int) ([]Job, error)
 }

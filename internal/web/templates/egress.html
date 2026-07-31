@@ -1,0 +1,55 @@
+{{define "content-egress"}}
+<h1>Egress identities</h1>
+{{if .Identities}}
+<table>
+  <tr><th>ID</th><th>IP</th><th>State</th><th>Reason</th><th></th></tr>
+  {{range .Identities}}
+  <tr id="egress-row-{{.ID}}">
+    <td class="mono">{{.ID}}</td>
+    <td class="mono">{{if .IP}}{{.IP}}{{else}}—{{end}}</td>
+    <td><span class="badge b-{{.State}}">{{.State}}</span></td>
+    <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+    <td>
+      <div class="row">
+        {{if ne .State "quarantined"}}
+        <button class="secondary" hx-post="/egress/{{.ID}}/quarantine" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML" hx-vals='{"reason":"manual (dashboard)"}'>Quarantine</button>
+        {{end}}
+        {{if or (eq .State "quarantined") (eq .State "disabled")}}
+        <button class="secondary" hx-post="/egress/{{.ID}}/enable" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML">Enable</button>
+        {{end}}
+        {{if ne .State "disabled"}}
+        <button class="danger" hx-post="/egress/{{.ID}}/disable" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML" hx-confirm="Disable {{.ID}} indefinitely?" hx-vals='{"reason":"manual (dashboard)"}'>Disable</button>
+        {{end}}
+      </div>
+    </td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<p class="muted">No egress identities configured.</p>
+{{end}}
+{{end}}
+
+{{/* Response fragment for a single row after an action; re-fetches the full
+     list and finds the matching row, since the manager only returns id/state. */}}
+{{define "egress-row"}}
+<tr id="egress-row-{{.ID}}">
+  <td class="mono">{{.ID}}</td>
+  <td class="mono">{{if .IP}}{{.IP}}{{else}}—{{end}}</td>
+  <td><span class="badge b-{{.State}}">{{.State}}</span></td>
+  <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+  <td>
+    <div class="row">
+      {{if ne .State "quarantined"}}
+      <button class="secondary" hx-post="/egress/{{.ID}}/quarantine" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML" hx-vals='{"reason":"manual (dashboard)"}'>Quarantine</button>
+      {{end}}
+      {{if or (eq .State "quarantined") (eq .State "disabled")}}
+      <button class="secondary" hx-post="/egress/{{.ID}}/enable" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML">Enable</button>
+      {{end}}
+      {{if ne .State "disabled"}}
+      <button class="danger" hx-post="/egress/{{.ID}}/disable" hx-target="#egress-row-{{.ID}}" hx-swap="outerHTML" hx-confirm="Disable {{.ID}} indefinitely?" hx-vals='{"reason":"manual (dashboard)"}'>Disable</button>
+      {{end}}
+    </div>
+  </td>
+</tr>
+{{end}}

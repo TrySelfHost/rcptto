@@ -1,0 +1,44 @@
+{{define "content-policies"}}
+<h1>Provider policies</h1>
+<p class="muted">Controls whether an address at a given destination provider is
+probed via SMTP, skipped (funnel findings only, honest <span class="mono">provider_skipped</span>),
+or scored statistically. Changes apply immediately.</p>
+<table>
+  <tr><th>Provider / domain</th><th>Strategy</th><th>Reason</th><th></th></tr>
+  {{range .Policies}}
+  <tr id="policy-row-{{.Key}}">
+    <td class="mono">{{.Key}}</td>
+    <td><span class="badge b-{{.Strategy}}">{{.Strategy}}</span></td>
+    <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+    <td>
+      <form class="row" hx-post="/policies/{{.Key}}" hx-target="#policy-row-{{.Key}}" hx-swap="outerHTML">
+        <select name="strategy">
+          <option value="probe" {{if eq .Strategy "probe"}}selected{{end}}>probe</option>
+          <option value="skip" {{if eq .Strategy "skip"}}selected{{end}}>skip</option>
+          <option value="statistical" {{if eq .Strategy "statistical"}}selected{{end}}>statistical</option>
+        </select>
+        <button type="submit" class="secondary">Update</button>
+      </form>
+    </td>
+  </tr>
+  {{end}}
+</table>
+{{end}}
+
+{{define "policy-row"}}
+<tr id="policy-row-{{.Key}}">
+  <td class="mono">{{.Key}}</td>
+  <td><span class="badge b-{{.Strategy}}">{{.Strategy}}</span></td>
+  <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+  <td>
+    <form class="row" hx-post="/policies/{{.Key}}" hx-target="#policy-row-{{.Key}}" hx-swap="outerHTML">
+      <select name="strategy">
+        <option value="probe" {{if eq .Strategy "probe"}}selected{{end}}>probe</option>
+        <option value="skip" {{if eq .Strategy "skip"}}selected{{end}}>skip</option>
+        <option value="statistical" {{if eq .Strategy "statistical"}}selected{{end}}>statistical</option>
+      </select>
+      <button type="submit" class="secondary">Update</button>
+    </form>
+  </td>
+</tr>
+{{end}}

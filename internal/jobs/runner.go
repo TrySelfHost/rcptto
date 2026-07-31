@@ -129,6 +129,11 @@ func (r *Runner) Get(ctx context.Context, id string) (store.Job, error) {
 	return r.store.GetJob(ctx, id)
 }
 
+// List returns the most recently created jobs, newest first.
+func (r *Runner) List(ctx context.Context, limit int) ([]store.Job, error) {
+	return r.store.ListJobs(ctx, limit)
+}
+
 // Results returns a page of a job's verdicts.
 func (r *Runner) Results(ctx context.Context, id string, cursor, limit int) ([]verdict.Verdict, int, error) {
 	return r.store.Results(ctx, id, cursor, limit)

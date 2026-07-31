@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -110,4 +111,24 @@ func (s *JobStore) SetStatus(_ context.Context, jobID string, status store.JobSt
 		}
 	}
 	return nil
+}
+
+// ListJobs implements store.JobStore, returning jobs newest-first.
+func (s *JobStore) ListJobs(_ context.Context, limit int) ([]store.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]store.Job, 0, len(s.jobs))
+	for _, e := range s.jobs {
+		out = append(out, e.job)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+
+	if limit <= 0 {
+		limit = 200
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
