@@ -48,7 +48,7 @@ type Result struct {
 	Verdict verdict.Verdict `json:"verdict"`
 }
 
-// JobStats summarises how a list turned out. It is computed by the store rather
+// JobStats summarizes how a list turned out. It is computed by the store rather
 // than by loading every row, so a million-row job costs one aggregate query.
 type JobStats struct {
 	// Total is the number of result rows recorded so far.

@@ -155,7 +155,9 @@ func (s *Sheet) DetectColumns() (emailCol, labelCol int) {
 		return -1, -1
 	}
 
-	emailCol, labelCol = -1, -1
+	// labelCol is resolved on the return paths below; only emailCol needs a
+	// starting value here.
+	emailCol = -1
 	bestHits := 0
 	for c := 0; c < width; c++ {
 		hits := 0
@@ -268,7 +270,7 @@ func looksLikeEmail(s string) bool {
 
 func headerLooksLikeName(h string) bool {
 	h = strings.ToLower(strings.TrimSpace(h))
-	for _, kw := range []string{"name", "client", "company", "contact", "customer", "organisation", "organization"} {
+	for _, kw := range []string{"name", "client", "company", "contact", "customer", "organization"} {
 		if strings.Contains(h, kw) {
 			return true
 		}

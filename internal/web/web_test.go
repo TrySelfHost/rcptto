@@ -296,7 +296,7 @@ func TestAssetsServed(t *testing.T) {
 }
 
 func TestJobSubmitParsesTextarea_Removed(t *testing.T) {
-	t.Skip("the paste-addresses form was removed in favour of file upload")
+	t.Skip("the paste-addresses form was removed in favor of file upload")
 	jb := &stubJobs{job: store.Job{ID: "job_1", Status: store.JobRunning, Total: 2}}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: jb}).Handler()
 

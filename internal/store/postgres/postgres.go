@@ -277,7 +277,7 @@ func scanJob(row interface{ Scan(...any) error }) (store.Job, error) {
 }
 
 // Stats implements store.JobStore, aggregating in the database so a large job
-// never has to be pulled into memory to be summarised.
+// never has to be pulled into memory to be summarized.
 func (s *JobStore) Stats(ctx context.Context, jobID string) (store.JobStats, error) {
 	if _, err := s.GetJob(ctx, jobID); err != nil {
 		return store.JobStats{}, err

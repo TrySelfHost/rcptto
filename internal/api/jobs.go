@@ -30,7 +30,7 @@ const (
 type createJobRequest struct {
 	// Emails is the simple form: addresses without labels.
 	Emails []string `json:"emails,omitempty"`
-	// Rows is the labelled form, carrying a client name alongside each address.
+	// Rows is the labeled form, carrying a client name alongside each address.
 	Rows []rowRequest `json:"rows,omitempty"`
 }
 
