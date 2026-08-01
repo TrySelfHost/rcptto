@@ -2,8 +2,6 @@
 <h1>Report <span class="mono" style="font-weight:400;font-size:1rem">{{.Job.ID}}</span></h1>
 <div class="row" style="margin:-0.75rem 0 1.5rem">
   <a href="/jobs/{{.Job.ID}}"><button type="button" class="secondary">Results</button></a>
-  <a href="/jobs/{{.Job.ID}}/export/csv"><button type="button" class="secondary">Export CSV</button></a>
-  <a href="/jobs/{{.Job.ID}}/export/xlsx"><button type="button" class="secondary">Export XLSX</button></a>
 </div>
 
 {{if eq .Total 0}}
@@ -62,6 +60,8 @@
   {{end}}
 </table>
 
+{{template "download-buckets" .Buckets}}
+
 <h2>Destination provider</h2>
 <p class="hint" style="margin:-0.5rem 0 .75rem">
   Consumer providers are skipped by policy rather than probed — probing them is
@@ -84,4 +84,28 @@
   {{end}}
 </table>
 {{end}}
+{{end}}
+
+{{define "download-buckets"}}
+<h2>Download</h2>
+<p class="hint" style="margin:-0.5rem 0 .75rem">
+  Results are split by what to do with each group. <strong>Not checked</strong>
+  are addresses provider policy skipped on purpose — they are not failures.
+</p>
+<table>
+  <tr><th>Group</th><th>Addresses</th><th></th></tr>
+  {{range .}}
+  <tr>
+    <td>{{.Label}}</td>
+    <td>{{.Count}}</td>
+    <td>
+      <div class="row">
+        <a href="?bucket={{.Bucket}}" style="display:none"></a>
+        <a href="export/csv?bucket={{.Bucket}}"><button type="button" class="secondary">CSV</button></a>
+        <a href="export/xlsx?bucket={{.Bucket}}"><button type="button" class="secondary">XLSX</button></a>
+      </div>
+    </td>
+  </tr>
+  {{end}}
+</table>
 {{end}}

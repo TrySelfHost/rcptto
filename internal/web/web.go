@@ -216,6 +216,8 @@ type jobShowData struct {
 	Results    []verdictView
 	HasMore    bool
 	NextCursor int
+	// Buckets drive the per-group download controls shown above the results.
+	Buckets []bucketView
 }
 
 // ---- rendering helpers -----------------------------------------------------
@@ -340,7 +342,13 @@ func (s *Server) loadJobShowData(ctx context.Context, id string) (jobShowData, e
 	for i, v := range items {
 		views[i] = newResultView(v)
 	}
-	return jobShowData{Job: newJobView(job), Results: views, HasMore: next > 0, NextCursor: next}, nil
+	data := jobShowData{Job: newJobView(job), Results: views, HasMore: next > 0, NextCursor: next}
+	// Stats are only needed for the download counts; a failure here should not
+	// stop the results page from rendering.
+	if stats, err := s.cfg.Jobs.Stats(ctx, id); err == nil {
+		data.Buckets = bucketViews(stats)
+	}
+	return data, nil
 }
 
 func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {

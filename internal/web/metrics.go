@@ -42,6 +42,9 @@ type jobMetrics struct {
 	Statuses  []metricRow
 	Reasons   []metricRow
 	Providers []metricRow
+
+	// Buckets drive the per-group download controls.
+	Buckets []bucketView
 }
 
 func (s *Server) handleJobMetrics(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +90,7 @@ func buildJobMetrics(job store.Job, stats store.JobStats) jobMetrics {
 	m.Statuses = breakdown(stats.ByStatus, stats.Total, true)
 	m.Reasons = breakdown(stats.BySubStatus, stats.Total, false)
 	m.Providers = breakdown(stats.ByProvider, stats.Total, false)
+	m.Buckets = bucketViews(stats)
 	return m
 }
 

@@ -257,17 +257,35 @@ func (s *Server) handleJobExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Exports are segregated by what the operator should do with each group;
+	// handing back one undifferentiated dump would leave them to re-do the
+	// segregation by hand.
+	bucket := Bucket(r.URL.Query().Get("bucket"))
+	if bucket == "" {
+		bucket = BucketAll
+	}
+	if !validBucket(bucket) {
+		http.Error(w, "unknown bucket; use safe, risky, undeliverable, skipped, retry, or all", http.StatusBadRequest)
+		return
+	}
+
 	results, err := s.allResults(r.Context(), id)
 	if err != nil {
 		http.Error(w, "could not load results: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	results = filterBucket(results, bucket)
+
+	name := id
+	if bucket != BucketAll {
+		name = id + "-" + string(bucket)
+	}
 
 	switch format {
 	case "csv":
-		writeResultsCSV(w, id, results)
+		writeResultsCSV(w, name, results)
 	case "xlsx":
-		writeResultsXLSX(w, id, results)
+		writeResultsXLSX(w, name, results)
 	default:
 		http.Error(w, "unsupported export format; use csv or xlsx", http.StatusBadRequest)
 	}
