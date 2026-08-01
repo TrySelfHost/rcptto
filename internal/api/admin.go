@@ -12,6 +12,10 @@ type EgressIdentity struct {
 	IP     string `json:"ip,omitempty"`
 	State  string `json:"state"`
 	Reason string `json:"reason,omitempty"`
+	// Online reports whether the identity's agent is reachable. A remote
+	// identity can be perfectly healthy yet unusable because its machine is
+	// down, so this is surfaced separately from State.
+	Online bool `json:"online"`
 }
 
 // PolicyEntry is one provider-policy rule, as exposed by the admin API.

@@ -49,6 +49,7 @@ type EgressIdentity struct {
 	IP     string
 	State  string
 	Reason string
+	Online bool
 }
 
 // Egress exposes the reputation manager for the dashboard.

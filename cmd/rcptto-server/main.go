@@ -30,6 +30,7 @@ import (
 	"github.com/tryselfhost/rcptto/internal/store/postgres"
 	"github.com/tryselfhost/rcptto/internal/verifier"
 	"github.com/tryselfhost/rcptto/internal/web"
+	"github.com/tryselfhost/rcptto/internal/worker"
 	"github.com/tryselfhost/rcptto/pkg/engine/builtin"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
@@ -95,6 +96,33 @@ func run() error {
 	}
 
 	policySet := policy.Default()
+
+	// Remote probe agents. Each agent owns one egress IP on its own machine;
+	// the control plane keeps all the intelligence and delegates only the SMTP
+	// probe. Identities are registered here so they appear in the dashboard
+	// even before the first health check reaches them.
+	agentCfgs, err := worker.ParseAgents(os.Getenv("RCPTTO_WORKERS"), os.Getenv("RCPTTO_WORKER_TOKEN"))
+	if err != nil {
+		return err
+	}
+	registry, err := worker.NewRegistry(agentCfgs, 60*time.Second)
+	if err != nil {
+		return err
+	}
+	for _, a := range agentCfgs {
+		egressMgr.AddIdentity(egress.Spec{
+			ID:        a.ID,
+			Kind:      egress.KindLocalIP,
+			WarmUp:    true, // a newly introduced remote IP has no reputation yet
+			Transport: egress.DirectTransport{},
+		})
+		// Until a health check succeeds the agent is unreachable, so keep it out
+		// of routing rather than letting probes fail against a dead box.
+		egressMgr.SetOnline(a.ID, false)
+	}
+	if registry.Len() > 0 {
+		log.Info("remote probe agents configured", "count", registry.Len())
+	}
 
 	// Pace probes per destination mail server. Without this, a bulk job
 	// concentrated on one domain hammers that domain's MX at full worker
@@ -180,6 +208,29 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Track agent reachability, so routing skips a box that has gone away and
+	// resumes using it — with its earned reputation intact — when it returns.
+	if registry.Len() > 0 {
+		go registry.HealthLoop(ctx, 30*time.Second, func(info worker.AgentInfo) {
+			egressMgr.SetOnline(info.ID, info.Online)
+			if info.Online {
+				// An agent's IP and HELO are only known once it has been reached.
+				egressMgr.AddIdentity(egress.Spec{
+					ID:        info.ID,
+					Kind:      egress.KindLocalIP,
+					IP:        info.IP,
+					HELO:      info.HELO,
+					Region:    info.Region,
+					ASN:       info.ASN,
+					Transport: egress.DirectTransport{},
+				})
+				log.Info("probe agent online", "id", info.ID, "ip", info.IP)
+			} else {
+				log.Warn("probe agent offline", "id", info.ID, "err", info.LastErr)
+			}
+		})
+	}
+
 	// Persist egress reputation periodically and once more on shutdown.
 	persistDone := make(chan struct{})
 	go func() {
@@ -239,7 +290,10 @@ func (a egressAdapter) Identities() []api.EgressIdentity {
 	infos := a.mgr.Identities()
 	out := make([]api.EgressIdentity, len(infos))
 	for i, info := range infos {
-		out[i] = api.EgressIdentity{ID: info.ID, IP: info.IP, State: string(info.State), Reason: info.Reason}
+		out[i] = api.EgressIdentity{
+			ID: info.ID, IP: info.IP, State: string(info.State),
+			Reason: info.Reason, Online: info.Online,
+		}
 	}
 	return out
 }
@@ -275,7 +329,10 @@ func (a webEgressAdapter) Identities() []web.EgressIdentity {
 	infos := a.mgr.Identities()
 	out := make([]web.EgressIdentity, len(infos))
 	for i, info := range infos {
-		out[i] = web.EgressIdentity{ID: info.ID, IP: info.IP, State: string(info.State), Reason: info.Reason}
+		out[i] = web.EgressIdentity{
+			ID: info.ID, IP: info.IP, State: string(info.State),
+			Reason: info.Reason, Online: info.Online,
+		}
 	}
 	return out
 }

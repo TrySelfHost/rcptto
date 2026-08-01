@@ -2,12 +2,13 @@
 <h1>Egress identities</h1>
 {{if .Identities}}
 <table>
-  <tr><th>ID</th><th>IP</th><th>State</th><th>Reason</th><th></th></tr>
+  <tr><th>ID</th><th>IP</th><th>State</th><th>Reachable</th><th>Reason</th><th></th></tr>
   {{range .Identities}}
   <tr id="egress-row-{{.ID}}">
     <td class="mono">{{.ID}}</td>
     <td class="mono">{{if .IP}}{{.IP}}{{else}}—{{end}}</td>
     <td><span class="badge b-{{.State}}">{{.State}}</span></td>
+    <td>{{if .Online}}<span class="badge b-active">online</span>{{else}}<span class="badge b-quarantined">offline</span>{{end}}</td>
     <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
     <td>
       <div class="row">
@@ -37,6 +38,7 @@
   <td class="mono">{{.ID}}</td>
   <td class="mono">{{if .IP}}{{.IP}}{{else}}—{{end}}</td>
   <td><span class="badge b-{{.State}}">{{.State}}</span></td>
+  <td>{{if .Online}}<span class="badge b-active">online</span>{{else}}<span class="badge b-quarantined">offline</span>{{end}}</td>
   <td class="muted">{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
   <td>
     <div class="row">

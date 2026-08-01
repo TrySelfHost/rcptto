@@ -39,7 +39,7 @@ What exists today:
 | [`internal/api`](internal/api) + [`cmd/rcptto-server`](cmd/rcptto-server) | HTTP API (`POST /v1/verify`, bulk `/v1/jobs`, `/healthz`, `/readyz`) with API-key auth and RFC 7807 errors, plus the runnable server binary. | ✅ implemented + tested |
 | [`internal/jobs`](internal/jobs) | Async bulk runner: dedups a batch, processes addresses through a bounded worker pool, records verdicts, and supports cancellation. In-process MVP; a durable bus (Redis/NATS) splits workers out later. | ✅ implemented + tested |
 | [`internal/egress`](internal/egress) | **The reputation manager** — the platform's differentiator. Health-scores each egress identity per destination, trips per-(identity,destination) circuit breakers, quarantines on block streaks, ramps warm-up daily caps, and routes each probe to the healthiest eligible identity. Implements the `EgressProvider` + `SignalSink` seams, closing the reputation feedback loop. | ✅ implemented + tested |
-| [`internal/worker`](internal/worker) + [`cmd/rcptto-worker`](cmd/rcptto-worker) | **Remote probe agents (stage 1 of distributed egress).** An egress IP can only be dialed from the machine that owns it, so pooling IPs across several VPS means delegating the SMTP probe to an agent on each box. The agent owns one identity, binds outbound connections to its IP, and speaks a small token-authenticated JSON protocol. `worker.Client` implements `engine.Engine`, so a remote probe is a drop-in for a local one. | ✅ implemented + tested (control-plane dispatch pending) |
+| [`internal/worker`](internal/worker) + [`cmd/rcptto-worker`](cmd/rcptto-worker) | **Remote probe agents.** An egress IP can only be dialed from the machine that owns it, so pooling IPs across several VPS means delegating the SMTP probe to an agent on each box. The agent owns one identity, binds outbound connections to its IP, and speaks a small token-authenticated JSON protocol. `worker.Client` implements `engine.Engine`, so a remote probe is a drop-in for a local one. The control plane registers agents, health-polls them, and skips unreachable ones — tracked separately from lifecycle state, so an agent restart never resets warm-up or clears a quarantine. | ✅ protocol, agent, and registration done; probe dispatch pending |
 | [`internal/ratelimit`](internal/ratelimit) | Per-destination token-bucket pacing for SMTP probes, keyed on the destination MX host. Prevents a bulk job concentrated on one domain from hammering that domain's mail server at full worker concurrency. Throttled probes defer honestly rather than blocking a worker. | ✅ implemented + tested |
 | [`internal/policy`](internal/policy) | Provider-policy engine — the honesty layer. Declarative probe/skip rules per destination provider, with sane defaults (Gmail/Yahoo/Microsoft/365 → skip, since probing them is unreliable and burns reputation for no signal). A skip never reaches the engine; the verdict is an honest `risky/provider_skipped`. | ✅ implemented + tested |
 | [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
@@ -47,9 +47,9 @@ What exists today:
 
 | [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next, completing distributed egress: agent registration and health
-tracking on the control plane, then routing probes to remote agents so one
-dashboard manages a pool of IPs spread across several machines. After that:
+Coming next, completing distributed egress: routing probes to the registered
+remote agents, so one dashboard manages a pool of IPs spread across several
+machines. Then agent deployment packaging. After that:
 Prometheus metrics and wiring PTR/FCrDNS audit results into reputation scoring. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
 
 ## Why another verifier?
@@ -128,6 +128,8 @@ curl -s -X PUT localhost:8080/v1/admin/policies/gmail \
 | `RCPTTO_SESSION_SECRET` | *(random)* | Signs dashboard session cookies. Set it so restarts don't log everyone out. |
 | `RCPTTO_SECURE_COOKIE` | `false` | Set `true` once TLS terminates in front of the server. |
 | `RCPTTO_DETECT_CATCHALL` | `true` | Probe a random local-part to detect catch-all domains. |
+| `RCPTTO_WORKERS` | *(empty)* | Remote probe agents as `id=url` pairs, e.g. `eg_vps2=https://w2.example.com:9090,eg_vps3=https://w3.example.com:9090`. |
+| `RCPTTO_WORKER_TOKEN` | *(empty)* | Shared secret for agent authentication. Must match each agent's own `RCPTTO_WORKER_TOKEN`. |
 | `RCPTTO_PROBE_RATE` | `1` | Sustained SMTP probes per second **per destination mail server**. |
 | `RCPTTO_PROBE_BURST` | `5` | Probes allowed back-to-back to one destination after an idle period. |
 | `RCPTTO_DNSBL_ZONES` | *(empty)* | Comma-separated DNSBL zones (e.g. `zen.spamhaus.org`). Egress IPs are audited every 15 min; listed IPs are quarantined. |

@@ -76,6 +76,7 @@ type record struct {
 	warmupStage      int
 	usedToday        int
 	lastReset        time.Time
+	online           bool
 	blockStreak      int
 	quarantinedUntil time.Time
 	quarantineReason string
@@ -128,6 +129,7 @@ func New(cfg Config) *Manager {
 		m.records[spec.ID] = &record{
 			spec:      spec,
 			state:     st,
+			online:    true,
 			lastReset: start,
 			health:    make(map[string]*health),
 			circuits:  make(map[string]*circuit),
@@ -206,6 +208,10 @@ type IdentityInfo struct {
 	IP     string
 	State  State
 	Reason string // quarantine reason, when applicable
+	// Online reports reachability. It is tracked separately from State so a
+	// transient agent outage does not disturb warm-up progress or quarantine:
+	// the identity simply stops being selected until it returns.
+	Online bool
 }
 
 // Identities returns a snapshot of the pool's identities.
@@ -215,7 +221,9 @@ func (m *Manager) Identities() []IdentityInfo {
 	out := make([]IdentityInfo, 0, len(m.order))
 	for _, id := range m.order {
 		r := m.records[id]
-		out = append(out, IdentityInfo{ID: id, IP: r.spec.IP, State: r.state, Reason: r.quarantineReason})
+		out = append(out, IdentityInfo{
+			ID: id, IP: r.spec.IP, State: r.state, Reason: r.quarantineReason, Online: r.online,
+		})
 	}
 	return out
 }
@@ -312,6 +320,11 @@ func (m *Manager) selectLocked(dest string, now time.Time) *record {
 
 func (m *Manager) eligibleLocked(rec *record, dest string, now time.Time) bool {
 	if rec.state == StateDisabled || rec.state == StateQuarantined {
+		return false
+	}
+	// An identity served by an unreachable remote agent cannot be probed
+	// through, regardless of how healthy its reputation is.
+	if !rec.online {
 		return false
 	}
 	if c := rec.circuits[dest]; c != nil && !c.allow(now) {
@@ -509,4 +522,48 @@ func (m *Manager) PersistLoop(ctx context.Context, interval time.Duration, onErr
 			}
 		}
 	}
+}
+
+// SetOnline records whether an identity's agent is currently reachable.
+//
+// Reachability is deliberately separate from the lifecycle state: a remote
+// agent restarting must not reset a multi-day warm-up or clear a quarantine, so
+// an offline identity is simply skipped during selection and resumes exactly
+// where it left off when it returns. Unknown ids are ignored.
+func (m *Manager) SetOnline(id string, online bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec := m.records[id]
+	if rec == nil || rec.online == online {
+		return
+	}
+	rec.online = online
+}
+
+// AddIdentity registers an identity at runtime, for agents discovered after
+// startup. An existing id has its metadata refreshed (IP, HELO and similar may
+// only become known once the agent is first reached) while its earned
+// reputation and lifecycle state are preserved.
+func (m *Manager) AddIdentity(spec Spec) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if rec, ok := m.records[spec.ID]; ok {
+		rec.spec = spec
+		return
+	}
+	st := StateActive
+	if spec.WarmUp {
+		st = StateWarming
+	}
+	m.records[spec.ID] = &record{
+		spec:      spec,
+		state:     st,
+		online:    true,
+		lastReset: m.now(),
+		health:    make(map[string]*health),
+		circuits:  make(map[string]*circuit),
+	}
+	m.order = append(m.order, spec.ID)
+	m.dirty = true
 }
