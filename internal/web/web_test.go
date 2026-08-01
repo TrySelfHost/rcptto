@@ -107,7 +107,7 @@ func TestHomeRenders(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<!doctype html>", "Verify an address", "Paste addresses", "/assets/htmx.min.js"} {
+	for _, want := range []string{"<!doctype html>", "Verify an address", "Upload a list", "/assets/htmx.min.js"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("home page missing %q", want)
 		}
@@ -291,7 +291,8 @@ func TestAssetsServed(t *testing.T) {
 	}
 }
 
-func TestJobSubmitParsesTextarea(t *testing.T) {
+func TestJobSubmitParsesTextarea_Removed(t *testing.T) {
+	t.Skip("the paste-addresses form was removed in favour of file upload")
 	jb := &stubJobs{job: store.Job{ID: "job_1", Status: store.JobRunning, Total: 2}}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: jb}).Handler()
 
@@ -369,5 +370,97 @@ func TestJobResultsPageNotFound(t *testing.T) {
 	rec := do(t, h, "GET", "/jobs/missing/results", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// stubServers is a canned Servers implementation.
+type stubServers struct{ agents []AgentInfo }
+
+func (s stubServers) Agents() []AgentInfo { return s.agents }
+
+// stubEgressList is a minimal Egress that only lists identities.
+type stubEgressList struct{ ids []EgressIdentity }
+
+func (s stubEgressList) Identities() []EgressIdentity { return s.ids }
+func (stubEgressList) Quarantine(string, string)      {}
+func (stubEgressList) Enable(string)                  {}
+func (stubEgressList) Disable(string, string)         {}
+
+func TestServersPageListsAgentsAndControlPlane(t *testing.T) {
+	h := New(Config{
+		Verifier: stubVerifier{},
+		Egress: stubEgressList{ids: []EgressIdentity{
+			{ID: "direct", IP: "1.1.1.1", State: "active", Online: true},
+			{ID: "eg_vps2", IP: "2.2.2.2", State: "warming", Online: true},
+		}},
+		Servers: stubServers{agents: []AgentInfo{
+			{ID: "eg_vps2", BaseURL: "https://w2.test:9090", Online: true, IP: "2.2.2.2", LastSeen: "2026-01-01 10:00:00"},
+		}},
+	}).Handler()
+
+	rec := do(t, h, "GET", "/servers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	// The remote agent appears with its address...
+	if !strings.Contains(body, "https://w2.test:9090") {
+		t.Errorf("agent address missing: %s", body)
+	}
+	if !strings.Contains(body, "probe agent") {
+		t.Errorf("agent role missing")
+	}
+	// ...and the local identity appears as the control plane, not duplicated as
+	// an agent.
+	if !strings.Contains(body, "control plane") {
+		t.Errorf("control plane row missing")
+	}
+	if strings.Count(body, "eg_vps2") != 1 {
+		t.Errorf("agent identity should appear once, not duplicated as a local row")
+	}
+}
+
+// An unreachable agent must show why, not just flip a badge.
+func TestServersPageShowsFailureReason(t *testing.T) {
+	h := New(Config{
+		Verifier: stubVerifier{},
+		Servers: stubServers{agents: []AgentInfo{
+			{ID: "eg_down", BaseURL: "https://w9.test:9090", Online: false, LastErr: "dial tcp: connection refused"},
+		}},
+	}).Handler()
+
+	rec := do(t, h, "GET", "/servers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "offline") {
+		t.Errorf("offline badge missing")
+	}
+	if !strings.Contains(body, "connection refused") {
+		t.Errorf("failure reason should be shown so the operator knows why: %s", body)
+	}
+}
+
+func TestServersPageWithoutAgentsExplainsHowToAddThem(t *testing.T) {
+	h := New(Config{
+		Verifier: stubVerifier{},
+		Egress:   stubEgressList{ids: []EgressIdentity{{ID: "direct", State: "active", Online: true}}},
+	}).Handler()
+
+	rec := do(t, h, "GET", "/servers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "RCPTTO_WORKERS") {
+		t.Errorf("should explain how to configure agents when none exist")
+	}
+}
+
+func TestServersPageSurvivesNilEgress(t *testing.T) {
+	h := New(Config{Verifier: stubVerifier{}}).Handler()
+	if rec := do(t, h, "GET", "/servers", ""); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 even with no egress configured", rec.Code)
 	}
 }

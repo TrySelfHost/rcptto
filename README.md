@@ -48,7 +48,9 @@ What exists today:
 
 | [`internal/web`](internal/web) | The dashboard — including CSV/XLSX upload with a column-mapping preview, and result export that preserves the client name. Uploading — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next: deployment packaging for agents (Dockerfile, systemd unit, and a
+Coming next: a per-list metrics page (counts by status and reason for any
+uploaded list), a settings page for the performance and reputation knobs that
+are currently environment-only, then deployment packaging for agents (Dockerfile, systemd unit, and a
 guide for standing up a multi-VPS pool). Then Prometheus metrics and wiring
 PTR/FCrDNS audit results into reputation scoring. After that:
 Prometheus metrics and wiring PTR/FCrDNS audit results into reputation scoring. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).

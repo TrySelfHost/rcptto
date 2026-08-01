@@ -195,6 +195,7 @@ func run() error {
 			Jobs:     runner,
 			Egress:   webEgressAdapter{egressMgr},
 			Policy:   webPolicyAdapter{policySet},
+			Servers:  webServersAdapter{registry},
 			Auth:     dashAuth,
 		}).Handler())
 		log.Info("dashboard enabled", "url", "http://localhost"+addr+"/", "auth", dashAuth != nil)
@@ -302,6 +303,28 @@ func (a egressAdapter) Identities() []api.EgressIdentity {
 func (a egressAdapter) Quarantine(id, reason string) { a.mgr.Quarantine(id, reason) }
 func (a egressAdapter) Enable(id string)             { a.mgr.Enable(id) }
 func (a egressAdapter) Disable(id, reason string)    { a.mgr.Disable(id, reason) }
+
+// webServersAdapter satisfies web.Servers, translating the registry's agent
+// view into the dashboard's wire shape so internal/web keeps no dependency on
+// internal/worker.
+type webServersAdapter struct{ reg *worker.Registry }
+
+func (a webServersAdapter) Agents() []web.AgentInfo {
+	agents := a.reg.Agents()
+	out := make([]web.AgentInfo, len(agents))
+	for i, ag := range agents {
+		lastSeen := ""
+		if !ag.LastSeen.IsZero() {
+			lastSeen = ag.LastSeen.Format("2006-01-02 15:04:05")
+		}
+		out[i] = web.AgentInfo{
+			ID: ag.ID, BaseURL: ag.BaseURL, Online: ag.Online,
+			IP: ag.IP, HELO: ag.HELO, Region: ag.Region, ASN: ag.ASN,
+			LastErr: ag.LastErr, LastSeen: lastSeen,
+		}
+	}
+	return out
+}
 
 // policyAdapter satisfies api.Policy by translating policy.Set's typed Strategy
 // into the API's plain strings, keeping internal/api free of a dependency on

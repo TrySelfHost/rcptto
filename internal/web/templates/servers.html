@@ -1,0 +1,43 @@
+{{define "content-servers"}}
+<h1>Servers</h1>
+<p class="muted" style="margin:-0.75rem 0 1.5rem">
+  Every machine that can send a probe, and whether it is reachable right now.
+  An egress IP can only be dialled from the machine that owns it, so each remote
+  agent provides exactly one identity.
+</p>
+
+<table>
+  <tr>
+    <th>Role</th><th>Identity</th><th>Address</th><th>Egress IP</th>
+    <th>State</th><th>Reachable</th><th>Last seen</th>
+  </tr>
+  {{range .Rows}}
+  <tr>
+    <td class="muted">{{.Role}}</td>
+    <td class="mono">{{.ID}}</td>
+    <td class="mono">{{.Address}}</td>
+    <td class="mono">{{if .IP}}{{.IP}}{{else}}<span class="faint">—</span>{{end}}</td>
+    <td>{{if .State}}<span class="badge b-{{.State}}">{{.State}}</span>{{else}}<span class="faint">—</span>{{end}}</td>
+    <td>
+      {{if .Online}}<span class="badge b-active">online</span>
+      {{else}}<span class="badge b-quarantined">offline</span>{{end}}
+    </td>
+    <td class="muted">{{if .LastSeen}}{{.LastSeen}}{{else}}<span class="faint">—</span>{{end}}</td>
+  </tr>
+  {{if .LastErr}}
+  <tr>
+    <td></td>
+    <td colspan="6" class="error" style="margin:0">{{.LastErr}}</td>
+  </tr>
+  {{end}}
+  {{end}}
+</table>
+
+{{if not .AgentsEnabled}}
+<p class="hint" style="margin-top:1rem">
+  No remote probe agents are configured. Set <span class="mono">RCPTTO_WORKERS</span>
+  and <span class="mono">RCPTTO_WORKER_TOKEN</span> to pool egress IPs across
+  several machines.
+</p>
+{{end}}
+{{end}}

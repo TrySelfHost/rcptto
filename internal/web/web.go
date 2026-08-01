@@ -68,6 +68,26 @@ type PolicyEntry struct {
 	Reason   string
 }
 
+// AgentInfo is a read-only view of one remote probe agent, mirroring
+// worker.AgentInfo so this package keeps no dependency on the worker package.
+type AgentInfo struct {
+	ID       string
+	BaseURL  string
+	Online   bool
+	IP       string
+	HELO     string
+	Region   string
+	ASN      string
+	LastErr  string
+	LastSeen string
+}
+
+// Servers exposes the remote agent fleet for the dashboard. Optional; when nil
+// the Servers page shows only the local control plane.
+type Servers interface {
+	Agents() []AgentInfo
+}
+
 // Policy exposes the provider-policy engine for the dashboard.
 type Policy interface {
 	List() []PolicyEntry
@@ -80,6 +100,9 @@ type Config struct {
 	Jobs     Jobs     // optional; job pages return 501 when nil
 	Egress   Egress   // optional; egress page returns 501 when nil
 	Policy   Policy   // optional; policies page returns 501 when nil
+	// Servers exposes the remote agent fleet. Optional; when nil the Servers
+	// page shows only the control plane's own egress.
+	Servers Servers
 	// Auth password-protects the dashboard. When nil the dashboard is
 	// unauthenticated, which is only safe on a trusted network or behind an
 	// authenticating reverse proxy.
@@ -105,7 +128,7 @@ func New(cfg Config) *Server {
 	if err != nil {
 		panic(err)
 	}
-	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
+	tmpl := template.Must(template.New("").Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.html"))
 	return &Server{cfg: cfg, tmpl: tmpl, auth: a, uploads: newUploadCache()}
 }
 
@@ -127,6 +150,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /egress/{id}/quarantine", s.handleEgressQuarantine)
 	mux.HandleFunc("POST /egress/{id}/enable", s.handleEgressEnable)
 	mux.HandleFunc("POST /egress/{id}/disable", s.handleEgressDisable)
+	mux.HandleFunc("GET /servers", s.handleServers)
 	mux.HandleFunc("GET /policies", s.handlePolicies)
 	mux.HandleFunc("POST /policies/{key}", s.handlePolicySet)
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -515,4 +539,103 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// templateFuncs provides the small helpers the upload templates need, so
+// column handling stays out of the template markup.
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		// columnName labels a column by its header when there is one, falling
+		// back to a positional name for headerless sheets.
+		"columnName": func(header []string, c int) string {
+			if c >= 0 && c < len(header) {
+				if h := strings.TrimSpace(header[c]); h != "" {
+					return h
+				}
+			}
+			return fmt.Sprintf("Column %d", c+1)
+		},
+		// cell reads a cell, tolerating ragged rows.
+		"cell": func(row []string, c int) string {
+			if c >= 0 && c < len(row) {
+				return row[c]
+			}
+			return ""
+		},
+	}
+}
+
+// identitiesOrEmpty returns an Egress port's identities, tolerating a nil port
+// so the Servers page renders even on a control plane without egress wired up.
+func identitiesOrEmpty(e Egress) []EgressIdentity {
+	if e == nil {
+		return nil
+	}
+	return e.Identities()
+}
+
+// serverRow is one machine in the fleet view: either the control plane itself
+// or a remote probe agent.
+type serverRow struct {
+	Role     string // "control plane" | "probe agent"
+	ID       string
+	Address  string
+	Online   bool
+	IP       string
+	HELO     string
+	Region   string
+	LastSeen string
+	LastErr  string
+	// State is the egress lifecycle state for this machine's identity, when it
+	// has one (warming/active/quarantined/disabled).
+	State string
+}
+
+// handleServers renders fleet health: which machines exist, whether they are
+// reachable, and what egress identity each provides. Without this, a remote box
+// going down shows up only as a badge flipping on the egress table, with no
+// indication of which machine or why.
+func (s *Server) handleServers(w http.ResponseWriter, _ *http.Request) {
+	// Egress state is keyed by identity id, so agents can be annotated with the
+	// lifecycle state of the identity they serve.
+	states := map[string]EgressIdentity{}
+	if s.cfg.Egress != nil {
+		for _, id := range s.cfg.Egress.Identities() {
+			states[id.ID] = id
+		}
+	}
+
+	rows := []serverRow{}
+	remote := map[string]bool{}
+	if s.cfg.Servers != nil {
+		for _, a := range s.cfg.Servers.Agents() {
+			remote[a.ID] = true
+			row := serverRow{
+				Role: "probe agent", ID: a.ID, Address: a.BaseURL, Online: a.Online,
+				IP: a.IP, HELO: a.HELO, Region: a.Region,
+				LastSeen: a.LastSeen, LastErr: a.LastErr,
+			}
+			if st, ok := states[a.ID]; ok {
+				row.State = st.State
+			}
+			rows = append(rows, row)
+		}
+	}
+
+	// Any egress identity not served by an agent belongs to the control plane
+	// itself, so the local machine appears in the same view.
+	for _, id := range identitiesOrEmpty(s.cfg.Egress) {
+		if remote[id.ID] {
+			continue
+		}
+		rows = append(rows, serverRow{
+			Role: "control plane", ID: id.ID, Address: "local",
+			Online: id.Online, IP: id.IP, State: id.State,
+		})
+	}
+
+	s.renderPage(w, "rcpttō — Servers", "content-servers", struct {
+		Rows          []serverRow
+		AgentsEnabled bool
+	}{Rows: rows, AgentsEnabled: s.cfg.Servers != nil})
 }

@@ -1,26 +1,9 @@
 {{define "upload-preview"}}
 <div class="stack">
-  <div class="muted">
-    <strong>{{.Filename}}</strong> — {{.Total}} row{{if ne .Total 1}}s{{end}} found.
-    Confirm which columns to use, then submit.
+  <div>
+    <strong>{{.Filename}}</strong>
+    <span class="muted">— {{.Total}} row{{if ne .Total 1}}s{{end}} ready to verify</span>
   </div>
-
-  <table>
-    <tr>
-      {{range .Columns}}<th>Column {{.}}</th>{{end}}
-    </tr>
-    {{if .Header}}
-    <tr>
-      {{range $i, $c := .Columns}}<td class="muted">{{index $.Header $c}}</td>{{end}}
-    </tr>
-    {{end}}
-    {{range .Rows}}
-    <tr>
-      {{$row := .}}
-      {{range $i, $c := $.Columns}}<td class="mono">{{if lt $c (len $row)}}{{index $row $c}}{{end}}</td>{{end}}
-    </tr>
-    {{end}}
-  </table>
 
   <form hx-post="/upload/confirm" hx-target="#job-create-result" hx-swap="innerHTML" class="stack">
     <input type="hidden" name="token" value="{{.Token}}">
@@ -28,8 +11,8 @@
       <label class="stack" style="flex:1">
         <span class="hint">Email column</span>
         <select name="email_col">
-          {{range $i, $c := .Columns}}
-          <option value="{{$c}}" {{if eq $c $.EmailCol}}selected{{end}}>Column {{$c}}{{if and $.Header (lt $c (len $.Header))}} — {{index $.Header $c}}{{end}}</option>
+          {{range $c := .Columns}}
+          <option value="{{$c}}" {{if eq $c $.EmailCol}}selected{{end}}>{{columnName $.Header $c}}</option>
           {{end}}
         </select>
       </label>
@@ -37,15 +20,24 @@
         <span class="hint">Client name column</span>
         <select name="label_col">
           <option value="-1" {{if lt $.LabelCol 0}}selected{{end}}>(none)</option>
-          {{range $i, $c := .Columns}}
-          <option value="{{$c}}" {{if eq $c $.LabelCol}}selected{{end}}>Column {{$c}}{{if and $.Header (lt $c (len $.Header))}} — {{index $.Header $c}}{{end}}</option>
+          {{range $c := .Columns}}
+          <option value="{{$c}}" {{if eq $c $.LabelCol}}selected{{end}}>{{columnName $.Header $c}}</option>
           {{end}}
         </select>
       </label>
     </div>
-    <div>
-      <button type="submit">Verify {{.Total}} row{{if ne .Total 1}}s{{end}}</button>
-    </div>
+
+    <details>
+      <summary class="hint" style="cursor:pointer">Sample of the first few rows</summary>
+      <table style="margin-top:.6rem">
+        <tr>{{range $c := .Columns}}<th>{{columnName $.Header $c}}</th>{{end}}</tr>
+        {{range $row := .Rows}}
+        <tr>{{range $c := $.Columns}}<td class="mono">{{cell $row $c}}</td>{{end}}</tr>
+        {{end}}
+      </table>
+    </details>
+
+    <div><button type="submit">Verify {{.Total}} row{{if ne .Total 1}}s{{end}}</button></div>
   </form>
 </div>
 {{end}}

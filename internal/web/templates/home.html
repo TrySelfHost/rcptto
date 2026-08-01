@@ -24,15 +24,4 @@
   <div id="upload-result" style="margin-top:1rem"></div>
 </div>
 
-<h2>Paste addresses</h2>
-<div class="card">
-  <form hx-post="/jobs" hx-target="#job-create-result" hx-swap="innerHTML">
-    <textarea name="emails" placeholder="one address per line&#10;a@example.com&#10;b@example.com" required></textarea>
-    <div class="hint">One email per line. Duplicates are removed automatically.</div>
-    <div style="margin-top:0.75rem">
-      <button type="submit">Submit job</button>
-    </div>
-  </form>
-  <div id="job-create-result" style="margin-top:1rem"></div>
-</div>
 {{end}}
