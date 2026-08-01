@@ -67,6 +67,7 @@ func run() error {
 			DetectCatchAll: getenvBool("RCPTTO_DETECT_CATCHALL", true),
 		}),
 		Token: token,
+		Log:   log,
 	})
 	if err != nil {
 		return err

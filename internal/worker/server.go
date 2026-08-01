@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -43,6 +45,10 @@ type ServerConfig struct {
 	// requests from the internet, so an unauthenticated agent would let anyone
 	// use your IP to probe mail servers.
 	Token string
+	// Log receives one record per probe. Optional; defaults to discarding.
+	// Agents are unattended remote boxes, so a request log is often the only
+	// way to see what an IP was actually asked to do.
+	Log *slog.Logger
 }
 
 // Server is the agent-side HTTP handler.
@@ -50,6 +56,7 @@ type Server struct {
 	identity Identity
 	engine   engine.Engine
 	token    string
+	log      *slog.Logger
 }
 
 // NewServer validates the config and builds an agent server.
@@ -63,7 +70,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Token == "" {
 		return nil, errors.New("worker: token is required; an unauthenticated agent lets anyone probe from your IP")
 	}
-	return &Server{identity: cfg.Identity, engine: cfg.Engine, token: cfg.Token}, nil
+	log := cfg.Log
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return &Server{identity: cfg.Identity, engine: cfg.Engine, token: cfg.Token, log: log}, nil
 }
 
 // Handler returns the agent's HTTP handler.
@@ -123,6 +134,13 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	// The agent owns the identity, so it stamps the verdict itself rather than
 	// trusting whatever the caller claimed.
 	v.EgressID = s.identity.ID
+
+	s.log.Info("probe executed",
+		"email", req.Task.Email,
+		"domain", req.Task.Domain,
+		"status", string(v.Status),
+		"sub_status", string(v.SubStatus),
+		"egress_id", s.identity.ID)
 
 	writeJSON(w, http.StatusOK, VerifyResponse{
 		Version: ProtocolVersion,

@@ -274,3 +274,145 @@ func TestNoLimiterMeansNoThrottling(t *testing.T) {
 		t.Errorf("engine calls = %d, want 5", spy.calls)
 	}
 }
+
+// stubResolver routes a fixed set of identity ids to a remote engine.
+type stubResolver struct {
+	remote map[string]engine.Engine
+}
+
+func (s stubResolver) EngineFor(id string) engine.Engine {
+	if e, ok := s.remote[id]; ok {
+		return e
+	}
+	return nil
+}
+
+// namedEgress is an EgressProvider returning a binding with a fixed identity id.
+type namedEgress struct{ id string }
+
+func (n namedEgress) Binding(context.Context, engine.Task) (engine.EgressBinding, error) {
+	return mock.NewBinding(n.id), nil
+}
+
+func TestRemoteIdentityIsProbedRemotely(t *testing.T) {
+	local := &spyEngine{inner: mock.New()}
+	remote := &spyEngine{inner: mock.New()}
+	svc := New(Config{
+		Pipeline: testPipeline(),
+		Engine:   local,
+		Egress:   namedEgress{id: "eg_remote"},
+		Engines:  stubResolver{remote: map[string]engine.Engine{"eg_remote": remote}},
+	})
+
+	if _, err := svc.Verify(context.Background(), "user@example.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if remote.calls != 1 {
+		t.Errorf("remote engine calls = %d, want 1", remote.calls)
+	}
+	if local.calls != 0 {
+		t.Errorf("local engine calls = %d, want 0 (a remote identity must not probe locally)", local.calls)
+	}
+}
+
+func TestLocalIdentityStaysLocal(t *testing.T) {
+	local := &spyEngine{inner: mock.New()}
+	remote := &spyEngine{inner: mock.New()}
+	svc := New(Config{
+		Pipeline: testPipeline(),
+		Engine:   local,
+		Egress:   namedEgress{id: "eg_local"},
+		Engines:  stubResolver{remote: map[string]engine.Engine{"eg_remote": remote}},
+	})
+
+	if _, err := svc.Verify(context.Background(), "user@example.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if local.calls != 1 {
+		t.Errorf("local engine calls = %d, want 1", local.calls)
+	}
+	if remote.calls != 0 {
+		t.Errorf("remote engine calls = %d, want 0", remote.calls)
+	}
+}
+
+func TestNoResolverAlwaysUsesLocalEngine(t *testing.T) {
+	local := &spyEngine{inner: mock.New()}
+	svc := New(Config{Pipeline: testPipeline(), Engine: local, Egress: namedEgress{id: "eg_anything"}})
+
+	if _, err := svc.Verify(context.Background(), "user@example.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if local.calls != 1 {
+		t.Errorf("local engine calls = %d, want 1", local.calls)
+	}
+}
+
+// Signals returned by a remote agent must reach the sink, or the control plane
+// would never learn that a remote IP is being blocked.
+func TestRemoteSignalsReachTheSink(t *testing.T) {
+	remote := &spyEngine{inner: mock.New()}
+	sink := &recordingSink{}
+	svc := New(Config{
+		Pipeline: testPipeline(),
+		Engine:   &spyEngine{inner: mock.New()},
+		Egress:   namedEgress{id: "eg_remote"},
+		Engines:  stubResolver{remote: map[string]engine.Engine{"eg_remote": remote}},
+		Sink:     sink,
+	})
+
+	if _, err := svc.Verify(context.Background(), "blocked@example.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(sink.signals) == 0 {
+		t.Fatal("no signals reached the sink from a remote probe")
+	}
+	if sink.signals[0].Kind != engine.SignalBlocked {
+		t.Errorf("signal kind = %s, want blocked", sink.signals[0].Kind)
+	}
+}
+
+type recordingSink struct{ signals []engine.Signal }
+
+func (r *recordingSink) Emit(_ context.Context, sigs []engine.Signal) {
+	r.signals = append(r.signals, sigs...)
+}
+
+// failingEngine always errors, standing in for an unreachable agent.
+type failingEngine struct{}
+
+func (failingEngine) Verify(context.Context, engine.Task, engine.EgressBinding) (verdict.Verdict, []engine.Signal, error) {
+	return verdict.Verdict{}, nil, fmt.Errorf("worker: contacting agent: connection refused")
+}
+func (failingEngine) Name() string              { return "failing" }
+func (failingEngine) Capabilities() engine.Caps { return engine.Caps{} }
+
+// An unreachable agent is a transport failure, not a verdict about the address:
+// the caller should get a deferred unknown, not an error.
+func TestUnreachableRemoteAgentDefersGracefully(t *testing.T) {
+	svc := New(Config{
+		Pipeline: testPipeline(),
+		Engine:   &spyEngine{inner: mock.New()},
+		Egress:   namedEgress{id: "eg_remote"},
+		Engines:  stubResolver{remote: map[string]engine.Engine{"eg_remote": failingEngine{}}},
+	})
+
+	v, err := svc.Verify(context.Background(), "user@example.com")
+	if err != nil {
+		t.Fatalf("an unreachable agent must not fail the request: %v", err)
+	}
+	if v.Status != verdict.StatusUnknown || v.SubStatus != verdict.SubTemporaryFailure {
+		t.Fatalf("got (%s,%s), want unknown/temporary_failure", v.Status, v.SubStatus)
+	}
+	if !v.Checks.Syntax.Valid || !v.Checks.MX.Found {
+		t.Errorf("deferred verdict should keep funnel findings: %+v", v.Checks)
+	}
+}
+
+// A local engine fault is a genuine internal error and must still surface.
+func TestLocalEngineErrorStillSurfaces(t *testing.T) {
+	svc := New(Config{Pipeline: testPipeline(), Engine: failingEngine{}})
+	if _, err := svc.Verify(context.Background(), "user@example.com"); err == nil {
+		t.Error("a local engine failure should surface as an error")
+	}
+}

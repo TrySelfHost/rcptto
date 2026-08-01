@@ -199,3 +199,24 @@ func TestHealthLoopChecksImmediatelyAndStops(t *testing.T) {
 		t.Fatal("HealthLoop did not stop on cancellation")
 	}
 }
+
+func TestEngineForReturnsClientForRemoteIdentity(t *testing.T) {
+	ts := startAgent(t, "eg_1")
+	r, _ := NewRegistry([]AgentConfig{{ID: "eg_1", BaseURL: ts.URL, Token: testToken}}, 2*time.Second)
+
+	if got := r.EngineFor("eg_1"); got == nil {
+		t.Fatal("EngineFor should return an engine for a configured agent")
+	}
+}
+
+// A typed nil pointer returned as an interface is non-nil, which would silently
+// route local probes into a dead client. EngineFor must return a true nil.
+func TestEngineForReturnsTrueNilForLocalIdentity(t *testing.T) {
+	r, _ := NewRegistry(nil, 2*time.Second)
+
+	got := r.EngineFor("some_local_identity")
+	if got != nil {
+		t.Fatalf("EngineFor returned a non-nil interface (%T) for an unknown identity; "+
+			"local probes would be routed to a nil client", got)
+	}
+}

@@ -34,6 +34,16 @@ type noopSink struct{}
 
 func (noopSink) Emit(context.Context, []engine.Signal) {}
 
+// EngineResolver selects the engine that probes through a given egress
+// identity. It exists so an identity owned by a remote agent is probed by that
+// agent — an IP can only be dialed from the machine that holds it — while local
+// identities keep using the in-process engine.
+//
+// Returning nil means "no special engine; use the configured default".
+type EngineResolver interface {
+	EngineFor(egressID string) engine.Engine
+}
+
 // Config configures a Service. Pipeline and Engine are required; the rest have
 // defaults.
 type Config struct {
@@ -44,6 +54,9 @@ type Config struct {
 	CacheTTL time.Duration     // defaults to 24h
 	Sink     SignalSink        // defaults to no-op
 	Policy   *policy.Set       // defaults to policy.Default()
+	// Engines routes probes for remote egress identities to their agents.
+	// Optional; without it every probe runs on the local engine.
+	Engines EngineResolver
 	// Limiter paces probes per destination. Optional but strongly recommended:
 	// without it, a bulk job concentrated on one domain will probe that
 	// domain's mail server at full worker concurrency.
@@ -60,6 +73,7 @@ type Service struct {
 	cacheTTL time.Duration
 	sink     SignalSink
 	policy   *policy.Set
+	engines  EngineResolver
 	limiter  *ratelimit.Limiter
 	now      func() time.Time
 }
@@ -78,6 +92,7 @@ func New(cfg Config) *Service {
 		cacheTTL: cfg.CacheTTL,
 		sink:     cfg.Sink,
 		policy:   cfg.Policy,
+		engines:  cfg.Engines,
 		limiter:  cfg.Limiter,
 		now:      cfg.Now,
 	}
@@ -185,12 +200,33 @@ func (s *Service) probe(ctx context.Context, res pipeline.Result) (verdict.Verdi
 	if err != nil {
 		return s.deferredVerdict(res), nil
 	}
-	ev, signals, err := s.engine.Verify(ctx, res.Task, binding)
+	eng, remote := s.engineFor(binding)
+	ev, signals, err := eng.Verify(ctx, res.Task, binding)
 	if err != nil {
+		if remote {
+			// The agent is unreachable — a transport failure, not a statement
+			// about the address. Defer honestly instead of failing the caller's
+			// request; the registry's health loop will take the agent out of
+			// rotation shortly.
+			return s.deferredVerdict(res), nil
+		}
 		return verdict.Verdict{}, err
 	}
 	s.sink.Emit(ctx, signals)
 	return merge(res, ev), nil
+}
+
+// engineFor returns the engine that should execute a probe through the given
+// binding, and whether that engine is a remote agent: a remote agent's client
+// when the identity lives on another machine, otherwise the local engine.
+func (s *Service) engineFor(binding engine.EgressBinding) (engine.Engine, bool) {
+	if s.engines == nil || binding == nil {
+		return s.engine, false
+	}
+	if remote := s.engines.EngineFor(binding.ID()); remote != nil {
+		return remote, true
+	}
+	return s.engine, false
 }
 
 // destinationKey identifies the mail server being probed, for rate-limiting

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tryselfhost/rcptto/pkg/engine"
 )
 
 // AgentConfig describes one remote agent the control plane should use.
@@ -228,4 +230,19 @@ func ParseAgents(spec, token string) ([]AgentConfig, error) {
 		out = append(out, AgentConfig{ID: id, BaseURL: url, Token: token})
 	}
 	return out, nil
+}
+
+// EngineFor returns the engine that probes through the given identity, or nil
+// when the identity is not served by a remote agent (so the caller falls back
+// to its local engine).
+//
+// The nil case is returned explicitly rather than by passing through a typed
+// nil pointer, which would produce a non-nil interface and route local probes
+// into a dead client.
+func (r *Registry) EngineFor(id string) engine.Engine {
+	c := r.ClientFor(id)
+	if c == nil {
+		return nil
+	}
+	return c
 }

@@ -144,6 +144,7 @@ func run() error {
 		Cache:   resultCache,
 		Policy:  policySet,
 		Limiter: limiter,
+		Engines: registry,
 	})
 
 	runner := jobs.New(jobs.Config{
