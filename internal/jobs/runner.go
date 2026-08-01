@@ -108,7 +108,8 @@ func (r *Runner) Submit(ctx context.Context, rows []Row) (store.Job, error) {
 	if len(unique) == 0 {
 		return store.Job{}, ErrNoEmails
 	}
-	if len(unique) > r.maxEmails {
+	_, maxEmails := r.limits()
+	if len(unique) > maxEmails {
 		return store.Job{}, ErrTooManyEmails
 	}
 
@@ -197,7 +198,8 @@ func (r *Runner) process(ctx context.Context, jobID string, rows []Row) {
 		byEmail[key] = append(byEmail[key], row.Label)
 	}
 
-	sem := make(chan struct{}, r.concurrency)
+	concurrency, _ := r.limits()
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
 	for _, email := range order {
@@ -274,4 +276,27 @@ func newJobID() string {
 		return "job_000000000000000000000000"
 	}
 	return "job_" + hex.EncodeToString(b[:])
+}
+
+// limits returns the current sizing under the lock, so a concurrent SetLimits
+// cannot race with a job being submitted or started.
+func (r *Runner) limits() (concurrency, maxEmails int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.concurrency, r.maxEmails
+}
+
+// SetLimits updates job sizing at runtime. Concurrency applies to jobs started
+// after the change; a job already running keeps the pool it was created with,
+// since resizing a live worker pool mid-flight would risk losing in-flight
+// probes for no real benefit.
+func (r *Runner) SetLimits(concurrency, maxEmails int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if concurrency > 0 {
+		r.concurrency = concurrency
+	}
+	if maxEmails > 0 {
+		r.maxEmails = maxEmails
+	}
 }

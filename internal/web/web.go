@@ -104,6 +104,9 @@ type Config struct {
 	// Servers exposes the remote agent fleet. Optional; when nil the Servers
 	// page shows only the control plane's own egress.
 	Servers Servers
+	// Settings exposes runtime configuration. Optional; when nil the settings
+	// page returns 501.
+	Settings SettingsManager
 	// Auth password-protects the dashboard. When nil the dashboard is
 	// unauthenticated, which is only safe on a trusted network or behind an
 	// authenticating reverse proxy.
@@ -153,6 +156,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /egress/{id}/enable", s.handleEgressEnable)
 	mux.HandleFunc("POST /egress/{id}/disable", s.handleEgressDisable)
 	mux.HandleFunc("GET /servers", s.handleServers)
+	mux.HandleFunc("GET /settings", s.handleSettings)
+	mux.HandleFunc("POST /settings", s.handleSettingsSave)
 	mux.HandleFunc("GET /policies", s.handlePolicies)
 	mux.HandleFunc("POST /policies/{key}", s.handlePolicySet)
 	mux.HandleFunc("GET /login", s.handleLoginForm)

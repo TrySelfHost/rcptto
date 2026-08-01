@@ -9,12 +9,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/tryselfhost/rcptto/internal/pipeline"
 	"github.com/tryselfhost/rcptto/internal/policy"
 	"github.com/tryselfhost/rcptto/internal/ratelimit"
+	"github.com/tryselfhost/rcptto/internal/settings"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/internal/store/memory"
 	"github.com/tryselfhost/rcptto/internal/store/postgres"
@@ -54,9 +57,10 @@ func run() error {
 	dashboardEnabled := getenvBool("RCPTTO_DASHBOARD", true)
 
 	var (
-		resultCache store.ResultStore = memory.NewResultStore()
-		jobStore    store.JobStore    = memory.NewJobStore()
-		egressStore store.EgressStore = memory.NewEgressStore()
+		resultCache   store.ResultStore   = memory.NewResultStore()
+		jobStore      store.JobStore      = memory.NewJobStore()
+		egressStore   store.EgressStore   = memory.NewEgressStore()
+		settingsStore store.SettingsStore = memory.NewSettingsStore()
 	)
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, err := postgres.Open(context.Background(), dsn)
@@ -69,6 +73,7 @@ func run() error {
 		resultCache = postgres.NewResultStore(db)
 		jobStore = postgres.NewJobStore(db)
 		egressStore = postgres.NewEgressStore(db)
+		settingsStore = postgres.NewSettingsStore(db)
 		log.Info("using postgres store")
 	} else {
 		log.Info("using in-memory store (set DATABASE_URL for persistence)")
@@ -132,25 +137,47 @@ func run() error {
 		Burst: getenvFloat("RCPTTO_PROBE_BURST", 5),
 	})
 
+	probeEngine := builtin.New(builtin.Config{
+		HELO:           helo,
+		MailFrom:       mailFrom,
+		DetectCatchAll: detectCatchAll,
+	})
+
 	svc := verifier.New(verifier.Config{
 		Pipeline: pipeline.New(pipeline.Config{}),
-		Engine: builtin.New(builtin.Config{
-			HELO:           helo,
-			MailFrom:       mailFrom,
-			DetectCatchAll: detectCatchAll,
-		}),
-		Egress:  egressMgr,
-		Sink:    egressMgr,
-		Cache:   resultCache,
-		Policy:  policySet,
-		Limiter: limiter,
-		Engines: registry,
+		Engine:   probeEngine,
+		Egress:   egressMgr,
+		Sink:     egressMgr,
+		Cache:    resultCache,
+		Policy:   policySet,
+		Limiter:  limiter,
+		Engines:  registry,
 	})
 
 	runner := jobs.New(jobs.Config{
 		Store:    jobStore,
 		Verifier: svc,
 	})
+
+	// Runtime settings: environment values are the starting point, then any
+	// previously saved configuration overrides them, so an operator's tuning
+	// survives a restart instead of silently reverting on every deploy.
+	settingsMgr := &settingsManager{
+		current: settings.Default().WithDefaults(),
+		store:   settingsStore, limiter: limiter, runner: runner,
+		egress: egressMgr, engine: probeEngine, log: log,
+	}
+	settingsMgr.current.ProbeRate = getenvFloat("RCPTTO_PROBE_RATE", settingsMgr.current.ProbeRate)
+	settingsMgr.current.ProbeBurst = getenvFloat("RCPTTO_PROBE_BURST", settingsMgr.current.ProbeBurst)
+	settingsMgr.current.DetectCatchAll = detectCatchAll
+
+	if saved, found, err := settingsStore.LoadSettings(context.Background()); err != nil {
+		log.Warn("could not load saved settings; using defaults", "err", err)
+	} else if found {
+		settingsMgr.current = saved.WithDefaults()
+		log.Info("restored saved settings")
+	}
+	settingsMgr.activate(settingsMgr.current)
 
 	apiHandler := api.New(api.Config{
 		Verifier: svc,
@@ -196,6 +223,7 @@ func run() error {
 			Egress:   webEgressAdapter{egressMgr},
 			Policy:   webPolicyAdapter{policySet},
 			Servers:  webServersAdapter{registry},
+			Settings: settingsMgr,
 			Auth:     dashAuth,
 		}).Handler())
 		log.Info("dashboard enabled", "url", "http://localhost"+addr+"/", "auth", dashAuth != nil)
@@ -303,6 +331,62 @@ func (a egressAdapter) Identities() []api.EgressIdentity {
 func (a egressAdapter) Quarantine(id, reason string) { a.mgr.Quarantine(id, reason) }
 func (a egressAdapter) Enable(id string)             { a.mgr.Enable(id) }
 func (a egressAdapter) Disable(id, reason string)    { a.mgr.Disable(id, reason) }
+
+// settingsManager persists runtime configuration and applies it to the live
+// components, so a change takes effect without a restart.
+//
+// Applying is deliberately narrow: the rate limiter and reputation thresholds
+// change immediately, while job concurrency applies to jobs started afterwards.
+// Resizing a running job's worker pool would risk losing in-flight probes for
+// no real benefit.
+type settingsManager struct {
+	mu      sync.RWMutex
+	current settings.Settings
+
+	store   store.SettingsStore
+	limiter *ratelimit.Limiter
+	runner  *jobs.Runner
+	egress  *egress.Manager
+	engine  *builtin.Engine
+	log     *slog.Logger
+}
+
+// Current implements web.SettingsManager.
+func (m *settingsManager) Current() settings.Settings {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.current
+}
+
+// Apply validates, persists, then activates. Persisting first means a restart
+// cannot resurrect settings that were rejected, and activating only after a
+// successful save keeps the running configuration and the stored one in step.
+func (m *settingsManager) Apply(ctx context.Context, s settings.Settings) error {
+	s = s.WithDefaults()
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if err := m.store.SaveSettings(ctx, s); err != nil {
+		return fmt.Errorf("could not save settings: %w", err)
+	}
+	m.activate(s)
+	m.log.Info("settings applied",
+		"probe_rate", s.ProbeRate, "probe_burst", s.ProbeBurst,
+		"job_concurrency", s.JobConcurrency, "quarantine_threshold", s.QuarantineThreshold)
+	return nil
+}
+
+// activate pushes settings into the live components.
+func (m *settingsManager) activate(s settings.Settings) {
+	m.mu.Lock()
+	m.current = s
+	m.mu.Unlock()
+
+	m.limiter.SetRate(s.ProbeRate, s.ProbeBurst)
+	m.runner.SetLimits(s.JobConcurrency, s.MaxEmailsPerJob)
+	m.egress.SetThresholds(s.QuarantineThreshold, s.CircuitThreshold)
+	m.engine.SetDetectCatchAll(s.DetectCatchAll)
+}
 
 // webServersAdapter satisfies web.Servers, translating the registry's agent
 // view into the dashboard's wire shape so internal/web keeps no dependency on

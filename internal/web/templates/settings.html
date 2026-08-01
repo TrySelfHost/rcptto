@@ -1,0 +1,48 @@
+{{define "content-settings"}}
+<h1>Settings</h1>
+<div id="settings-form">{{template "settings-form" .}}</div>
+{{end}}
+
+{{define "settings-form"}}
+<div id="settings-form">
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  {{if .Saved}}<div class="card" style="border-color:var(--good-br);background:var(--good-bg);color:var(--good);margin-bottom:1rem">Settings saved and applied.</div>{{end}}
+
+  <form hx-post="/settings" hx-target="#settings-form" hx-swap="outerHTML">
+    <h2>Performance</h2>
+    <div class="card stack">
+      {{range .Performance}}{{template "settings-field" .}}{{end}}
+    </div>
+
+    <h2>Reputation guards</h2>
+    <p class="hint" style="margin:-0.5rem 0 .75rem">
+      These decide how quickly a degrading egress IP is pulled out of service.
+      Raising them makes the platform more tolerant of failures, which means a
+      problem runs for longer before it is contained.
+    </p>
+    <div class="card stack">
+      {{range .Reputation}}{{template "settings-field" .}}{{end}}
+    </div>
+
+    <div style="margin-top:1.25rem"><button type="submit">Save settings</button></div>
+  </form>
+</div>
+{{end}}
+
+{{define "settings-field"}}
+<div class="stack" style="gap:.3rem">
+  {{if .IsBool}}
+    <label class="row" style="gap:.5rem;align-items:center">
+      <input type="checkbox" name="{{.Name}}" value="1" {{if .Checked}}checked{{end}} style="width:auto">
+      <strong>{{.Label}}</strong>
+    </label>
+  {{else}}
+    <label>
+      <strong>{{.Label}}</strong>
+      {{if .Danger}}<span class="badge b-warning" style="margin-left:.4rem">affects reputation</span>{{end}}
+      <input type="text" name="{{.Name}}" value="{{.Value}}" style="margin-top:.3rem">
+    </label>
+  {{end}}
+  <div class="hint">{{.Help}}{{if .Max}} Maximum {{.Max}}.{{end}}</div>
+</div>
+{{end}}

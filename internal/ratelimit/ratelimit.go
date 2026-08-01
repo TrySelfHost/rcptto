@@ -186,3 +186,17 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+// SetRate updates the sustained per-destination rate. Existing buckets keep
+// their current token balance and simply refill at the new rate, so a change
+// takes effect immediately without resetting anyone's pacing.
+func (l *Limiter) SetRate(rate, burst float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if rate > 0 {
+		l.rate = rate
+	}
+	if burst > 0 {
+		l.burst = burst
+	}
+}

@@ -567,3 +567,17 @@ func (m *Manager) AddIdentity(spec Spec) {
 	m.order = append(m.order, spec.ID)
 	m.dirty = true
 }
+
+// SetThresholds updates the reputation guards at runtime. Lower values are more
+// cautious: fewer consecutive failures are needed before an identity is
+// withdrawn or a destination circuit opens.
+func (m *Manager) SetThresholds(quarantine, circuit int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if quarantine > 0 {
+		m.quarantineThreshold = quarantine
+	}
+	if circuit > 0 {
+		m.circuitThreshold = circuit
+	}
+}

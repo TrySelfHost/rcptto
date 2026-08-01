@@ -12,6 +12,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/tryselfhost/rcptto/pkg/engine"
@@ -47,6 +48,7 @@ type Config struct {
 
 // Engine is the builtin SMTP verification engine.
 type Engine struct {
+	mu  sync.RWMutex
 	cfg Config
 }
 
@@ -146,7 +148,7 @@ func (e *Engine) probeHost(ctx context.Context, t engine.Task, eg engine.EgressB
 
 	out := classifyRCPT(code, msg)
 	catchAll := false
-	if out.status == verdict.StatusDeliverable && e.cfg.DetectCatchAll {
+	if out.status == verdict.StatusDeliverable && e.detectCatchAllEnabled() {
 		catchAll = e.detectCatchAll(sess, t.Domain)
 		if catchAll {
 			out.status = verdict.StatusRisky
@@ -241,4 +243,20 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// SetDetectCatchAll toggles catch-all detection at runtime. Detection is
+// accurate but costs a second probe for every accepted address, so it is worth
+// disabling when egress budget is tight.
+func (e *Engine) SetDetectCatchAll(on bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.DetectCatchAll = on
+}
+
+// detectCatchAllEnabled reads the flag under the lock.
+func (e *Engine) detectCatchAllEnabled() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.cfg.DetectCatchAll
 }

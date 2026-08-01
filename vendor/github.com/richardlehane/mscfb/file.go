@@ -25,7 +25,7 @@ import (
 	"github.com/richardlehane/msoleps/types"
 )
 
-//objectType types
+// objectType types
 const (
 	unknown     uint8 = 0x0 // this means unallocated - typically zeroed dir entries
 	storage     uint8 = 0x1 // this means dir

@@ -1,3 +1,4 @@
+//go:build gofuzz
 // +build gofuzz
 
 // fuzzing with https://github.com/dvyukov/go-fuzz
