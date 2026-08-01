@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/jobs", s.handleCreateJob)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /v1/jobs/{id}/results", s.handleJobResults)
+	mux.HandleFunc("GET /v1/jobs/{id}/stats", s.handleJobStats)
 	mux.HandleFunc("POST /v1/jobs/{id}/cancel", s.handleCancelJob)
 	mux.HandleFunc("GET /v1/admin/egress", s.handleListEgress)
 	mux.HandleFunc("POST /v1/admin/egress/{id}/quarantine", s.handleQuarantineEgress)

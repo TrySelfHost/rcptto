@@ -48,8 +48,7 @@ What exists today:
 
 | [`internal/web`](internal/web) | The dashboard — including CSV/XLSX upload with a column-mapping preview, and result export that preserves the client name. Uploading — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next: a per-list metrics page (counts by status and reason for any
-uploaded list), a settings page for the performance and reputation knobs that
+Coming next: a settings page for the performance and reputation knobs that
 are currently environment-only, then deployment packaging for agents (Dockerfile, systemd unit, and a
 guide for standing up a multi-VPS pool). Then Prometheus metrics and wiring
 PTR/FCrDNS audit results into reputation scoring. After that:

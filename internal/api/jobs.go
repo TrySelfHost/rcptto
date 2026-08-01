@@ -17,6 +17,7 @@ type Jobs interface {
 	Get(ctx context.Context, id string) (store.Job, error)
 	List(ctx context.Context, limit int) ([]store.Job, error)
 	Results(ctx context.Context, id string, cursor, limit int) ([]store.Result, int, error)
+	Stats(ctx context.Context, id string) (store.JobStats, error)
 	Cancel(ctx context.Context, id string) error
 }
 
@@ -125,6 +126,23 @@ func (s *Server) handleJobResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resultsResponse{Results: items, NextCursor: next})
+}
+
+func (s *Server) handleJobStats(w http.ResponseWriter, r *http.Request) {
+	if s.jobs == nil {
+		writeProblem(w, http.StatusNotImplemented, "jobs_disabled", "bulk jobs are not enabled on this server")
+		return
+	}
+	stats, err := s.jobs.Stats(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrJobNotFound) {
+		writeProblem(w, http.StatusNotFound, "job_not_found", "no job with that id")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "stats_failed", "the statistics could not be computed")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {

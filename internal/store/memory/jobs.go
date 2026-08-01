@@ -131,3 +131,36 @@ func (s *JobStore) ListJobs(_ context.Context, limit int) ([]store.Job, error) {
 	}
 	return out, nil
 }
+
+// Stats implements store.JobStore.
+func (s *JobStore) Stats(_ context.Context, jobID string) (store.JobStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.jobs[jobID]
+	if !ok {
+		return store.JobStats{}, store.ErrJobNotFound
+	}
+
+	stats := store.JobStats{
+		ByStatus:    map[string]int{},
+		BySubStatus: map[string]int{},
+		ByProvider:  map[string]int{},
+	}
+	for _, r := range e.results {
+		v := r.Verdict
+		stats.Total++
+		stats.ByStatus[string(v.Status)]++
+		stats.BySubStatus[string(v.SubStatus)]++
+		provider := v.Provider
+		if provider == "" {
+			provider = "unknown"
+		}
+		stats.ByProvider[provider]++
+		if v.Checks.SMTP.Probed {
+			stats.Probed++
+		} else {
+			stats.NotProbed++
+		}
+	}
+	return stats, nil
+}

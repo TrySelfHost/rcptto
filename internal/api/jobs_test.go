@@ -28,6 +28,9 @@ func (s stubJobs) Results(context.Context, string, int, int) ([]store.Result, in
 	return s.results, s.next, s.get
 }
 func (s stubJobs) Cancel(context.Context, string) error { return s.cancel }
+func (s stubJobs) Stats(context.Context, string) (store.JobStats, error) {
+	return store.JobStats{Total: 1, ByStatus: map[string]int{"deliverable": 1}}, s.get
+}
 
 func TestCreateJobAccepted(t *testing.T) {
 	j := stubJobs{job: store.Job{ID: "job_1", Status: store.JobRunning, Total: 3}}

@@ -275,3 +275,50 @@ func scanJob(row interface{ Scan(...any) error }) (store.Job, error) {
 	}
 	return job, nil
 }
+
+// Stats implements store.JobStore, aggregating in the database so a large job
+// never has to be pulled into memory to be summarised.
+func (s *JobStore) Stats(ctx context.Context, jobID string) (store.JobStats, error) {
+	if _, err := s.GetJob(ctx, jobID); err != nil {
+		return store.JobStats{}, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT
+		     COALESCE(verdict->>'status', '')                                    AS status,
+		     COALESCE(verdict->>'sub_status', '')                                AS sub_status,
+		     COALESCE(NULLIF(verdict->>'provider', ''), 'unknown')               AS provider,
+		     COALESCE((verdict->'checks'->'smtp'->>'probed')::boolean, false)    AS probed,
+		     COUNT(*)                                                            AS n
+		   FROM job_results
+		  WHERE job_id = $1
+		  GROUP BY 1, 2, 3, 4`, jobID)
+	if err != nil {
+		return store.JobStats{}, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	stats := store.JobStats{
+		ByStatus:    map[string]int{},
+		BySubStatus: map[string]int{},
+		ByProvider:  map[string]int{},
+	}
+	for rows.Next() {
+		var status, subStatus, provider string
+		var probed bool
+		var n int
+		if err := rows.Scan(&status, &subStatus, &provider, &probed, &n); err != nil {
+			return store.JobStats{}, err
+		}
+		stats.Total += n
+		stats.ByStatus[status] += n
+		stats.BySubStatus[subStatus] += n
+		stats.ByProvider[provider] += n
+		if probed {
+			stats.Probed += n
+		} else {
+			stats.NotProbed += n
+		}
+	}
+	return stats, rows.Err()
+}

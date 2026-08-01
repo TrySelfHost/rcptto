@@ -31,6 +31,7 @@ type stubJobs struct {
 	getErr    error
 	canceled  string
 	submitted []jobs.Row
+	stats     store.JobStats
 }
 
 func (s *stubJobs) Submit(_ context.Context, rows []jobs.Row) (store.Job, error) {
@@ -43,6 +44,9 @@ func (s *stubJobs) Results(context.Context, string, int, int) ([]store.Result, i
 	return s.results, s.next, s.getErr
 }
 func (s *stubJobs) Cancel(_ context.Context, id string) error { s.canceled = id; return nil }
+func (s *stubJobs) Stats(context.Context, string) (store.JobStats, error) {
+	return s.stats, s.getErr
+}
 
 // stubEgress records control calls.
 type stubEgress struct {

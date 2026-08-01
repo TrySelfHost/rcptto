@@ -48,6 +48,24 @@ type Result struct {
 	Verdict verdict.Verdict `json:"verdict"`
 }
 
+// JobStats summarises how a list turned out. It is computed by the store rather
+// than by loading every row, so a million-row job costs one aggregate query.
+type JobStats struct {
+	// Total is the number of result rows recorded so far.
+	Total int `json:"total"`
+	// ByStatus counts the four-valued verdict.
+	ByStatus map[string]int `json:"by_status"`
+	// BySubStatus counts the machine-readable reason codes.
+	BySubStatus map[string]int `json:"by_sub_status"`
+	// ByProvider counts destination provider classes.
+	ByProvider map[string]int `json:"by_provider"`
+	// Probed counts addresses that cost an actual SMTP connection; NotProbed
+	// counts those resolved by the funnel or provider policy alone. The split
+	// is how much egress reputation the list consumed.
+	Probed    int `json:"probed"`
+	NotProbed int `json:"not_probed"`
+}
+
 // JobStore persists bulk jobs and their per-address results.
 type JobStore interface {
 	// CreateJob stores a new job. Total should already reflect the deduplicated
@@ -66,6 +84,8 @@ type JobStore interface {
 	// SetStatus updates the job status, setting CompletedAt for terminal states.
 	// Returns ErrJobNotFound for an unknown id.
 	SetStatus(ctx context.Context, jobID string, status JobStatus) error
+	// Stats aggregates a job's results. Returns ErrJobNotFound for an unknown id.
+	Stats(ctx context.Context, jobID string) (JobStats, error)
 	// ListJobs returns the most recently created jobs, newest first, capped at
 	// limit (a limit <= 0 uses a sensible default). Intended for dashboards and
 	// admin views, not for high-throughput lookups.

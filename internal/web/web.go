@@ -41,6 +41,7 @@ type Jobs interface {
 	Get(ctx context.Context, id string) (store.Job, error)
 	List(ctx context.Context, limit int) ([]store.Job, error)
 	Results(ctx context.Context, id string, cursor, limit int) ([]store.Result, int, error)
+	Stats(ctx context.Context, id string) (store.JobStats, error)
 	Cancel(ctx context.Context, id string) error
 }
 
@@ -144,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /jobs/{id}/results", s.handleJobResultsPage)
 	mux.HandleFunc("POST /jobs/{id}/cancel", s.handleJobCancel)
 	mux.HandleFunc("GET /jobs/{id}/export/{format}", s.handleJobExport)
+	mux.HandleFunc("GET /jobs/{id}/metrics", s.handleJobMetrics)
 	mux.HandleFunc("POST /upload", s.handleUploadPreview)
 	mux.HandleFunc("POST /upload/confirm", s.handleUploadConfirm)
 	mux.HandleFunc("GET /egress", s.handleEgress)

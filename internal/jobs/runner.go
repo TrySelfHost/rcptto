@@ -143,6 +143,11 @@ func (r *Runner) Get(ctx context.Context, id string) (store.Job, error) {
 	return r.store.GetJob(ctx, id)
 }
 
+// Stats aggregates a job's results.
+func (r *Runner) Stats(ctx context.Context, id string) (store.JobStats, error) {
+	return r.store.Stats(ctx, id)
+}
+
 // List returns the most recently created jobs, newest first.
 func (r *Runner) List(ctx context.Context, limit int) ([]store.Job, error) {
 	return r.store.ListJobs(ctx, limit)

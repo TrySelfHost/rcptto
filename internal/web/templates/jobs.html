@@ -4,13 +4,14 @@
 <h1>Jobs</h1>
 {{if .Jobs}}
 <table>
-  <tr><th>ID</th><th>Status</th><th>Progress</th><th>Created</th></tr>
+  <tr><th>ID</th><th>Status</th><th>Progress</th><th>Created</th><th></th></tr>
   {{range .Jobs}}
   <tr>
     <td class="mono"><a href="/jobs/{{.ID}}" hx-boost="true">{{.ID}}</a></td>
     <td><span class="badge b-{{.StatusClass}}">{{.Status}}</span></td>
     <td>{{.Done}} / {{.Total}}</td>
     <td class="muted">{{.CreatedAtStr}}</td>
+    <td><a href="/jobs/{{.ID}}/metrics" hx-boost="true">Report</a></td>
   </tr>
   {{end}}
 </table>
