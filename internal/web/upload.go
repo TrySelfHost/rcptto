@@ -108,6 +108,9 @@ type uploadPreview struct {
 	EmailCol int
 	LabelCol int
 	Total    int
+	// Error is shown above the mapping controls when a confirmation failed for
+	// a reason the operator can correct without re-uploading.
+	Error string
 }
 
 // handleUploadPreview parses an uploaded sheet and shows the detected column
@@ -182,9 +185,17 @@ func (s *Server) handleUploadConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-renders the mapping panel with a message, so a correctable mistake does
+	// not cost the operator the form they were working in.
+	retry := func(msg string) {
+		p := buildPreview(token, pending.filename, pending.sheet, 0, -1)
+		p.Error = msg
+		s.renderFragment(w, "upload-preview", p)
+	}
+
 	emailCol, err := strconv.Atoi(r.FormValue("email_col"))
 	if err != nil || emailCol < 0 {
-		s.renderFragment(w, "verdict-error", "choose which column holds the email address")
+		retry("Choose which column holds the email address.")
 		return
 	}
 	labelCol, err := strconv.Atoi(r.FormValue("label_col"))
@@ -194,7 +205,21 @@ func (s *Server) handleUploadConfirm(w http.ResponseWriter, r *http.Request) {
 
 	extracted := pending.sheet.Extract(emailCol, labelCol)
 	if len(extracted) == 0 {
-		s.renderFragment(w, "verdict-error", "no addresses found in the selected column")
+		retry("No values found in the selected column — pick a different one.")
+		return
+	}
+
+	// Guard against the operator picking the wrong column. Extract returns
+	// whatever the cells contain, so without this a column of client names
+	// would be submitted as addresses and burn a whole job on garbage.
+	plausible := 0
+	for _, e := range extracted {
+		if ingest.LooksLikeEmail(e.Email) {
+			plausible++
+		}
+	}
+	if plausible == 0 {
+		retry("That column does not look like email addresses — pick the column containing them.")
 		return
 	}
 
@@ -205,7 +230,7 @@ func (s *Server) handleUploadConfirm(w http.ResponseWriter, r *http.Request) {
 
 	job, err := s.cfg.Jobs.Submit(r.Context(), rows)
 	if err != nil {
-		s.renderFragment(w, "verdict-error", "could not submit the list: "+err.Error())
+		retry("Could not submit the list: " + err.Error())
 		return
 	}
 	s.uploads.drop(token)

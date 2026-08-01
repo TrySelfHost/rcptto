@@ -251,8 +251,12 @@ func rowHasEmail(row []string) bool {
 	return false
 }
 
-// looksLikeEmail is a deliberately loose check used only to find the right
-// column. Real validation happens in the verification funnel.
+// LooksLikeEmail is a deliberately loose check used to find and validate the
+// address column. Real validation happens in the verification funnel; this only
+// needs to distinguish "this column holds addresses" from "this column holds
+// something else entirely".
+func LooksLikeEmail(s string) bool { return looksLikeEmail(s) }
+
 func looksLikeEmail(s string) bool {
 	s = strings.TrimSpace(s)
 	at := strings.IndexByte(s, '@')

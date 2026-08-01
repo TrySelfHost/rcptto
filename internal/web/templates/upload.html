@@ -1,11 +1,12 @@
 {{define "upload-preview"}}
-<div class="stack">
+<div class="stack" id="upload-panel">
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   <div>
     <strong>{{.Filename}}</strong>
     <span class="muted">— {{.Total}} row{{if ne .Total 1}}s{{end}} ready to verify</span>
   </div>
 
-  <form hx-post="/upload/confirm" hx-target="#job-create-result" hx-swap="innerHTML" class="stack">
+  <form hx-post="/upload/confirm" hx-target="#upload-panel" hx-swap="outerHTML" class="stack">
     <input type="hidden" name="token" value="{{.Token}}">
     <div class="row">
       <label class="stack" style="flex:1">

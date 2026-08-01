@@ -219,3 +219,48 @@ func extractToken(t *testing.T, body string) string {
 	}
 	return rest[:j]
 }
+
+// An htmx form whose hx-target does not exist on the page swaps into nothing,
+// so the click appears to do nothing at all. This regression test pins the
+// contract: every target the upload flow posts to must be present in the
+// document it renders into.
+func TestUploadFormTargetsExistOnPage(t *testing.T) {
+	h := New(Config{Verifier: stubVerifier{}, Jobs: &stubJobs{}}).Handler()
+
+	home := do(t, h, "GET", "/", "").Body.String()
+	if !strings.Contains(home, `id="upload-result"`) {
+		t.Fatalf("home page is missing the #upload-result target the upload form posts into")
+	}
+
+	preview := uploadFile(t, h, "c.csv", "Name,Email\nAcme,a@acme.com\n").Body.String()
+	// The confirm form must target something the preview itself renders.
+	if !strings.Contains(preview, `id="upload-panel"`) {
+		t.Fatalf("preview is missing the #upload-panel target its confirm form posts into")
+	}
+	if !strings.Contains(preview, `hx-target="#upload-panel"`) {
+		t.Errorf("confirm form should target the preview panel: %s", preview)
+	}
+}
+
+// A correctable mistake must not destroy the mapping form.
+func TestConfirmWithWrongColumnKeepsTheForm(t *testing.T) {
+	jb := &stubJobs{job: store.Job{ID: "job_1"}}
+	h := New(Config{Verifier: stubVerifier{}, Jobs: jb}).Handler()
+
+	rec := uploadFile(t, h, "c.csv", "Name,Email\nAcme,a@acme.com\n")
+	token := extractToken(t, rec.Body.String())
+
+	// Column 0 holds names, not addresses.
+	rec2 := do(t, h, "POST", "/upload/confirm", "token="+token+"&email_col=0&label_col=1")
+	body := rec2.Body.String()
+
+	if !strings.Contains(body, "does not look like email addresses") {
+		t.Errorf("expected a correctable error message, got %s", body)
+	}
+	if !strings.Contains(body, `id="upload-panel"`) {
+		t.Errorf("the mapping form must survive a correctable error so it can be retried")
+	}
+	if jb.submitted != nil {
+		t.Errorf("nothing should have been submitted: %+v", jb.submitted)
+	}
+}
