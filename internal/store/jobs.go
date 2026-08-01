@@ -35,6 +35,19 @@ type Job struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
+// Result is one verified address together with the label it arrived with.
+//
+// The label is kept beside the Verdict rather than inside it: a verdict is the
+// public verification contract, while the label is ingestion metadata that
+// exists purely so results can be matched back to the client's original sheet.
+type Result struct {
+	// Label is the client name (or other identifying text) from the uploaded
+	// list. Empty for addresses submitted without one.
+	Label string `json:"label,omitempty"`
+	// Verdict is the verification outcome.
+	Verdict verdict.Verdict `json:"verdict"`
+}
+
 // JobStore persists bulk jobs and their per-address results.
 type JobStore interface {
 	// CreateJob stores a new job. Total should already reflect the deduplicated
@@ -42,14 +55,14 @@ type JobStore interface {
 	CreateJob(ctx context.Context, job Job) error
 	// GetJob returns the job, or ErrJobNotFound.
 	GetJob(ctx context.Context, id string) (Job, error)
-	// AppendResult records one address's verdict, increments Done, and marks the
+	// AppendResult records one address's result, increments Done, and marks the
 	// job completed once Done reaches Total (unless it was canceled). Returns
 	// ErrJobNotFound for an unknown id.
-	AppendResult(ctx context.Context, jobID string, v verdict.Verdict) error
+	AppendResult(ctx context.Context, jobID string, r Result) error
 	// Results returns a page of verdicts starting at cursor (a zero-based
 	// offset), up to limit items. next is the cursor for the following page, or
 	// 0 when there are no more. Returns ErrJobNotFound for an unknown id.
-	Results(ctx context.Context, jobID string, cursor, limit int) (items []verdict.Verdict, next int, err error)
+	Results(ctx context.Context, jobID string, cursor, limit int) (items []Result, next int, err error)
 	// SetStatus updates the job status, setting CompletedAt for terminal states.
 	// Returns ErrJobNotFound for an unknown id.
 	SetStatus(ctx context.Context, jobID string, status JobStatus) error

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/verdict"
 )
@@ -13,17 +14,17 @@ import (
 // stubJobs is a canned Jobs implementation for handler tests.
 type stubJobs struct {
 	job     store.Job
-	results []verdict.Verdict
+	results []store.Result
 	next    int
 	submit  error
 	get     error
 	cancel  error
 }
 
-func (s stubJobs) Submit(context.Context, []string) (store.Job, error) { return s.job, s.submit }
-func (s stubJobs) Get(context.Context, string) (store.Job, error)      { return s.job, s.get }
-func (s stubJobs) List(context.Context, int) ([]store.Job, error)      { return []store.Job{s.job}, s.get }
-func (s stubJobs) Results(context.Context, string, int, int) ([]verdict.Verdict, int, error) {
+func (s stubJobs) Submit(context.Context, []jobs.Row) (store.Job, error) { return s.job, s.submit }
+func (s stubJobs) Get(context.Context, string) (store.Job, error)        { return s.job, s.get }
+func (s stubJobs) List(context.Context, int) ([]store.Job, error)        { return []store.Job{s.job}, s.get }
+func (s stubJobs) Results(context.Context, string, int, int) ([]store.Result, int, error) {
 	return s.results, s.next, s.get
 }
 func (s stubJobs) Cancel(context.Context, string) error { return s.cancel }
@@ -57,7 +58,7 @@ func TestGetJobNotFound(t *testing.T) {
 
 func TestJobResults(t *testing.T) {
 	j := stubJobs{
-		results: []verdict.Verdict{{Email: "a@x.com", Status: verdict.StatusDeliverable}},
+		results: []store.Result{{Label: "Acme", Verdict: verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable}}},
 		next:    5,
 	}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: j}).Handler()

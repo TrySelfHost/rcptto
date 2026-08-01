@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/verdict"
 )
@@ -36,10 +37,10 @@ type Verifier interface {
 
 // Jobs handles bulk verification.
 type Jobs interface {
-	Submit(ctx context.Context, emails []string) (store.Job, error)
+	Submit(ctx context.Context, rows []jobs.Row) (store.Job, error)
 	Get(ctx context.Context, id string) (store.Job, error)
 	List(ctx context.Context, limit int) ([]store.Job, error)
-	Results(ctx context.Context, id string, cursor, limit int) ([]verdict.Verdict, int, error)
+	Results(ctx context.Context, id string, cursor, limit int) ([]store.Result, int, error)
 	Cancel(ctx context.Context, id string) error
 }
 
@@ -138,10 +139,20 @@ func (s *Server) Handler() http.Handler {
 type verdictView struct {
 	verdict.Verdict
 	ConfidencePct int
+	// Label is the client name the address arrived under, shown in job result
+	// tables so a verified list can be read against the original sheet.
+	Label string
 }
 
 func newVerdictView(v verdict.Verdict) verdictView {
 	return verdictView{Verdict: v, ConfidencePct: int(v.Confidence*100 + 0.5)}
+}
+
+// newResultView adapts a stored result, keeping its label.
+func newResultView(r store.Result) verdictView {
+	view := newVerdictView(r.Verdict)
+	view.Label = r.Label
+	return view
 }
 
 // jobView adapts store.Job for templates, precomputing progress and a
@@ -256,13 +267,13 @@ func (s *Server) handleJobSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lines := strings.Split(r.FormValue("emails"), "\n")
-	emails := make([]string, 0, len(lines))
+	rows := make([]jobs.Row, 0, len(lines))
 	for _, l := range lines {
 		if t := strings.TrimSpace(l); t != "" {
-			emails = append(emails, t)
+			rows = append(rows, jobs.Row{Email: t})
 		}
 	}
-	job, err := s.cfg.Jobs.Submit(r.Context(), emails)
+	job, err := s.cfg.Jobs.Submit(r.Context(), rows)
 	if err != nil {
 		s.renderFragment(w, "verdict-error", "could not submit job: "+err.Error())
 		return
@@ -297,7 +308,7 @@ func (s *Server) loadJobShowData(ctx context.Context, id string) (jobShowData, e
 	}
 	views := make([]verdictView, len(items))
 	for i, v := range items {
-		views[i] = newVerdictView(v)
+		views[i] = newResultView(v)
 	}
 	return jobShowData{Job: newJobView(job), Results: views, HasMore: next > 0, NextCursor: next}, nil
 }
@@ -356,7 +367,7 @@ func (s *Server) handleJobResultsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]verdictView, len(items))
 	for i, v := range items {
-		views[i] = newVerdictView(v)
+		views[i] = newResultView(v)
 	}
 	s.renderFragment(w, "job-result-rows-page", jobShowData{
 		Job: newJobView(job), Results: views, HasMore: next > 0, NextCursor: next,

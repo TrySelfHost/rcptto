@@ -35,6 +35,14 @@ const (
 	defaultMaxEmails   = 100_000
 )
 
+// Row is one submitted address with the label it arrived under. Addresses
+// submitted without a list (a pasted textarea, or the single-verify form) carry
+// an empty Label.
+type Row struct {
+	Label string
+	Email string
+}
+
 // Verifier verifies a single address. It is satisfied by *verifier.Service.
 type Verifier interface {
 	Verify(ctx context.Context, email string) (verdict.Verdict, error)
@@ -87,10 +95,16 @@ func New(cfg Config) *Runner {
 	return r
 }
 
-// Submit deduplicates the addresses, creates a job, and starts processing it
+// Submit deduplicates the rows, creates a job, and starts processing it
 // asynchronously. The returned Job reflects the initial (running) state.
-func (r *Runner) Submit(ctx context.Context, emails []string) (store.Job, error) {
-	unique := dedup(emails)
+//
+// Deduplication is by (label, email): the same address listed under two
+// different client names produces two result rows, because the caller needs a
+// result against each name. The address is still probed only once — the verdict
+// is fanned out to every row sharing it — so duplicates cost no extra
+// reputation.
+func (r *Runner) Submit(ctx context.Context, rows []Row) (store.Job, error) {
+	unique := dedup(rows)
 	if len(unique) == 0 {
 		return store.Job{}, ErrNoEmails
 	}
@@ -134,8 +148,8 @@ func (r *Runner) List(ctx context.Context, limit int) ([]store.Job, error) {
 	return r.store.ListJobs(ctx, limit)
 }
 
-// Results returns a page of a job's verdicts.
-func (r *Runner) Results(ctx context.Context, id string, cursor, limit int) ([]verdict.Verdict, int, error) {
+// Results returns a page of a job's results.
+func (r *Runner) Results(ctx context.Context, id string, cursor, limit int) ([]store.Result, int, error) {
 	return r.store.Results(ctx, id, cursor, limit)
 }
 
@@ -162,13 +176,26 @@ func (r *Runner) Cancel(ctx context.Context, id string) error {
 // and deterministic tests.
 func (r *Runner) Wait() { r.wg.Wait() }
 
-// process verifies the addresses through a bounded worker pool, recording each
-// verdict. It stops early if ctx is canceled.
-func (r *Runner) process(ctx context.Context, jobID string, emails []string) {
+// process verifies the addresses through a bounded worker pool, recording a
+// result for every submitted row. Rows sharing an address are grouped so the
+// address is probed once and its verdict fanned out, which keeps duplicate
+// entries from spending extra egress reputation.
+func (r *Runner) process(ctx context.Context, jobID string, rows []Row) {
+	// Group row labels by address, preserving first-seen order.
+	order := make([]string, 0, len(rows))
+	byEmail := make(map[string][]string, len(rows))
+	for _, row := range rows {
+		key := strings.ToLower(row.Email)
+		if _, seen := byEmail[key]; !seen {
+			order = append(order, row.Email)
+		}
+		byEmail[key] = append(byEmail[key], row.Label)
+	}
+
 	sem := make(chan struct{}, r.concurrency)
 	var wg sync.WaitGroup
 
-	for _, email := range emails {
+	for _, email := range order {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
@@ -190,7 +217,9 @@ func (r *Runner) process(ctx context.Context, jobID string, emails []string) {
 					CheckedAt: r.now(),
 				}
 			}
-			_ = r.store.AppendResult(ctx, jobID, v)
+			for _, label := range byEmail[strings.ToLower(email)] {
+				_ = r.store.AppendResult(ctx, jobID, store.Result{Label: label, Verdict: v})
+			}
 		}(email)
 	}
 	wg.Wait()
@@ -211,22 +240,24 @@ func (r *Runner) finish(jobID string) {
 	}
 }
 
-// dedup removes blank and duplicate addresses (compared case-insensitively),
-// preserving the original casing of the first occurrence and input order.
-func dedup(emails []string) []string {
-	seen := make(map[string]struct{}, len(emails))
-	out := make([]string, 0, len(emails))
-	for _, e := range emails {
-		trimmed := strings.TrimSpace(e)
-		key := strings.ToLower(trimmed)
-		if key == "" {
+// dedup drops rows with a blank address and collapses exact duplicates of the
+// same (label, address) pair, comparing case-insensitively while preserving the
+// original casing and input order.
+func dedup(rows []Row) []Row {
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		email := strings.TrimSpace(row.Email)
+		if email == "" {
 			continue
 		}
+		label := strings.TrimSpace(row.Label)
+		key := strings.ToLower(label) + "\x00" + strings.ToLower(email)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, trimmed)
+		out = append(out, Row{Label: label, Email: email})
 	}
 	return out
 }

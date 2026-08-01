@@ -21,7 +21,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 	}
 
 	// First result: still running.
-	if err := s.AppendResult(ctx, "job_1", verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable}); err != nil {
+	if err := s.AppendResult(ctx, "job_1", store.Result{Verdict: verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable}}); err != nil {
 		t.Fatalf("append 1: %v", err)
 	}
 	got, _ := s.GetJob(ctx, "job_1")
@@ -30,7 +30,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 	}
 
 	// Second result reaches Total: completed with timestamp.
-	_ = s.AppendResult(ctx, "job_1", verdict.Verdict{Email: "b@x.com", Status: verdict.StatusUndeliverable})
+	_ = s.AppendResult(ctx, "job_1", store.Result{Verdict: verdict.Verdict{Email: "b@x.com", Status: verdict.StatusUndeliverable}})
 	got, _ = s.GetJob(ctx, "job_1")
 	if got.Status != store.JobCompleted || got.Done != 2 {
 		t.Fatalf("after 2: status=%s done=%d", got.Status, got.Done)
@@ -46,7 +46,7 @@ func TestJobStoreNotFound(t *testing.T) {
 	if _, err := s.GetJob(ctx, "nope"); !errors.Is(err, store.ErrJobNotFound) {
 		t.Errorf("GetJob err = %v, want ErrJobNotFound", err)
 	}
-	if err := s.AppendResult(ctx, "nope", verdict.Verdict{}); !errors.Is(err, store.ErrJobNotFound) {
+	if err := s.AppendResult(ctx, "nope", store.Result{Verdict: verdict.Verdict{}}); !errors.Is(err, store.ErrJobNotFound) {
 		t.Errorf("AppendResult err = %v, want ErrJobNotFound", err)
 	}
 	if _, _, err := s.Results(ctx, "nope", 0, 10); !errors.Is(err, store.ErrJobNotFound) {
@@ -94,7 +94,7 @@ func TestJobStoreResultsPagination(t *testing.T) {
 	ctx := context.Background()
 	_ = s.CreateJob(ctx, store.Job{ID: "j", Status: store.JobRunning, Total: 5})
 	for i := 0; i < 5; i++ {
-		_ = s.AppendResult(ctx, "j", verdict.Verdict{Email: "x@y.com"})
+		_ = s.AppendResult(ctx, "j", store.Result{Verdict: verdict.Verdict{Email: "x@y.com"}})
 	}
 
 	page, next, err := s.Results(ctx, "j", 0, 2)

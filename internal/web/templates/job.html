@@ -32,7 +32,7 @@
 {{if .Results}}
 <h2>Results ({{len .Results}}{{if .HasMore}}+{{end}})</h2>
 <table>
-  <tr><th>Email</th><th>Status</th><th>Reason</th></tr>
+  <tr><th>Client</th><th>Email</th><th>Status</th><th>Reason</th></tr>
   <tbody id="result-rows">{{template "job-result-rows" .Results}}</tbody>
 </table>
 <div id="load-more-wrap" style="margin-top:0.75rem">{{template "load-more-button" .}}</div>
@@ -48,6 +48,7 @@
 {{define "job-result-rows"}}
 {{range .}}
 <tr>
+  <td>{{if .Label}}{{.Label}}{{else}}<span class="faint">—</span>{{end}}</td>
   <td class="mono">{{.Email}}</td>
   <td><span class="badge b-{{.Status}}">{{.Status}}</span></td>
   <td class="muted">{{.SubStatus}}</td>

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tryselfhost/rcptto/internal/store"
-	"github.com/tryselfhost/rcptto/pkg/verdict"
 )
 
 // JobStore is a concurrency-safe, in-memory store.JobStore.
@@ -19,7 +18,7 @@ type JobStore struct {
 
 type jobEntry struct {
 	job     store.Job
-	results []verdict.Verdict
+	results []store.Result
 }
 
 // NewJobStore returns an empty in-memory JobStore.
@@ -47,14 +46,14 @@ func (s *JobStore) GetJob(_ context.Context, id string) (store.Job, error) {
 }
 
 // AppendResult implements store.JobStore.
-func (s *JobStore) AppendResult(_ context.Context, jobID string, v verdict.Verdict) error {
+func (s *JobStore) AppendResult(_ context.Context, jobID string, r store.Result) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.jobs[jobID]
 	if !ok {
 		return store.ErrJobNotFound
 	}
-	e.results = append(e.results, v)
+	e.results = append(e.results, r)
 	e.job.Done++
 	if e.job.Status != store.JobCanceled && e.job.Done >= e.job.Total {
 		e.job.Status = store.JobCompleted
@@ -65,7 +64,7 @@ func (s *JobStore) AppendResult(_ context.Context, jobID string, v verdict.Verdi
 }
 
 // Results implements store.JobStore.
-func (s *JobStore) Results(_ context.Context, jobID string, cursor, limit int) ([]verdict.Verdict, int, error) {
+func (s *JobStore) Results(_ context.Context, jobID string, cursor, limit int) ([]store.Result, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.jobs[jobID]
@@ -79,13 +78,13 @@ func (s *JobStore) Results(_ context.Context, jobID string, cursor, limit int) (
 		limit = len(e.results)
 	}
 	if cursor >= len(e.results) {
-		return []verdict.Verdict{}, 0, nil
+		return []store.Result{}, 0, nil
 	}
 	end := cursor + limit
 	if end > len(e.results) {
 		end = len(e.results)
 	}
-	page := make([]verdict.Verdict, end-cursor)
+	page := make([]store.Result, end-cursor)
 	copy(page, e.results[cursor:end])
 
 	next := 0

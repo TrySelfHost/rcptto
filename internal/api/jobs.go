@@ -9,15 +9,14 @@ import (
 
 	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/store"
-	"github.com/tryselfhost/rcptto/pkg/verdict"
 )
 
 // Jobs is the behavior the API needs from the bulk-verification runner.
 type Jobs interface {
-	Submit(ctx context.Context, emails []string) (store.Job, error)
+	Submit(ctx context.Context, rows []jobs.Row) (store.Job, error)
 	Get(ctx context.Context, id string) (store.Job, error)
 	List(ctx context.Context, limit int) ([]store.Job, error)
-	Results(ctx context.Context, id string, cursor, limit int) ([]verdict.Verdict, int, error)
+	Results(ctx context.Context, id string, cursor, limit int) ([]store.Result, int, error)
 	Cancel(ctx context.Context, id string) error
 }
 
@@ -28,12 +27,32 @@ const (
 )
 
 type createJobRequest struct {
-	Emails []string `json:"emails"`
+	// Emails is the simple form: addresses without labels.
+	Emails []string `json:"emails,omitempty"`
+	// Rows is the labelled form, carrying a client name alongside each address.
+	Rows []rowRequest `json:"rows,omitempty"`
+}
+
+type rowRequest struct {
+	Label string `json:"label"`
+	Email string `json:"email"`
+}
+
+// toRows normalizes either request form into runner rows.
+func (r createJobRequest) toRows() []jobs.Row {
+	out := make([]jobs.Row, 0, len(r.Emails)+len(r.Rows))
+	for _, e := range r.Emails {
+		out = append(out, jobs.Row{Email: e})
+	}
+	for _, row := range r.Rows {
+		out = append(out, jobs.Row{Label: row.Label, Email: row.Email})
+	}
+	return out
 }
 
 type resultsResponse struct {
-	Results    []verdict.Verdict `json:"results"`
-	NextCursor int               `json:"next_cursor"`
+	Results    []store.Result `json:"results"`
+	NextCursor int            `json:"next_cursor"`
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +69,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := s.jobs.Submit(r.Context(), req.Emails)
+	job, err := s.jobs.Submit(r.Context(), req.toRows())
 	switch {
 	case errors.Is(err, jobs.ErrNoEmails):
 		writeProblem(w, http.StatusBadRequest, "no_emails", "at least one email address is required")

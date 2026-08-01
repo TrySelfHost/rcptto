@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tryselfhost/rcptto/internal/jobs"
 	"github.com/tryselfhost/rcptto/internal/store"
 	"github.com/tryselfhost/rcptto/pkg/verdict"
 )
@@ -25,20 +26,20 @@ func (s stubVerifier) Verify(context.Context, string) (verdict.Verdict, error) {
 type stubJobs struct {
 	job       store.Job
 	jobs      []store.Job
-	results   []verdict.Verdict
+	results   []store.Result
 	next      int
 	getErr    error
 	canceled  string
-	submitted []string
+	submitted []jobs.Row
 }
 
-func (s *stubJobs) Submit(_ context.Context, emails []string) (store.Job, error) {
-	s.submitted = emails
+func (s *stubJobs) Submit(_ context.Context, rows []jobs.Row) (store.Job, error) {
+	s.submitted = rows
 	return s.job, nil
 }
 func (s *stubJobs) Get(context.Context, string) (store.Job, error) { return s.job, s.getErr }
 func (s *stubJobs) List(context.Context, int) ([]store.Job, error) { return s.jobs, nil }
-func (s *stubJobs) Results(context.Context, string, int, int) ([]verdict.Verdict, int, error) {
+func (s *stubJobs) Results(context.Context, string, int, int) ([]store.Result, int, error) {
 	return s.results, s.next, s.getErr
 }
 func (s *stubJobs) Cancel(_ context.Context, id string) error { s.canceled = id; return nil }
@@ -160,8 +161,10 @@ func TestJobsListRenders(t *testing.T) {
 func TestJobShowRendersProgressAndResults(t *testing.T) {
 	j := &stubJobs{
 		job: store.Job{ID: "job_1", Status: store.JobRunning, Total: 4, Done: 2, CreatedAt: time.Unix(0, 0).UTC()},
-		results: []verdict.Verdict{
-			{Email: "a@b.com", Status: verdict.StatusDeliverable, SubStatus: verdict.SubValidMailbox},
+		results: []store.Result{
+			{Label: "Acme Ltd", Verdict: verdict.Verdict{
+				Email: "a@b.com", Status: verdict.StatusDeliverable, SubStatus: verdict.SubValidMailbox,
+			}},
 		},
 	}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: j}).Handler()
@@ -303,8 +306,8 @@ func TestJobSubmitParsesTextarea(t *testing.T) {
 		t.Fatalf("submitted = %q, want %q", jb.submitted, want)
 	}
 	for i := range want {
-		if jb.submitted[i] != want[i] {
-			t.Errorf("submitted[%d] = %q, want %q", i, jb.submitted[i], want[i])
+		if jb.submitted[i].Email != want[i] {
+			t.Errorf("submitted[%d] = %q, want %q", i, jb.submitted[i].Email, want[i])
 		}
 	}
 	if !strings.Contains(rec.Body.String(), "job_1") {
@@ -315,7 +318,7 @@ func TestJobSubmitParsesTextarea(t *testing.T) {
 func TestJobStatusFragmentPolls(t *testing.T) {
 	jb := &stubJobs{
 		job:     store.Job{ID: "job_1", Status: store.JobRunning, Total: 4, Done: 2, CreatedAt: time.Unix(0, 0)},
-		results: []verdict.Verdict{{Email: "a@x.com", Status: verdict.StatusDeliverable}},
+		results: []store.Result{{Verdict: verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable}}},
 	}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: jb}).Handler()
 
@@ -340,7 +343,7 @@ func TestJobStatusFragmentPolls(t *testing.T) {
 func TestJobResultsPageReturnsRowsAndOOBButton(t *testing.T) {
 	jb := &stubJobs{
 		job:     store.Job{ID: "job_1", Status: store.JobRunning, Total: 100, Done: 100},
-		results: []verdict.Verdict{{Email: "a@x.com", Status: verdict.StatusRisky}},
+		results: []store.Result{{Verdict: verdict.Verdict{Email: "a@x.com", Status: verdict.StatusRisky}}},
 		next:    50, // more results remain
 	}
 	h := New(Config{Verifier: stubVerifier{}, Jobs: jb}).Handler()

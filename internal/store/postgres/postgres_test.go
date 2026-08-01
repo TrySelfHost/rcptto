@@ -88,13 +88,13 @@ func TestJobStoreLifecycle(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	_ = js.AppendResult(ctx, "job_1", verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable})
+	_ = js.AppendResult(ctx, "job_1", store.Result{Label: "Acme Ltd", Verdict: verdict.Verdict{Email: "a@x.com", Status: verdict.StatusDeliverable}})
 	got, _ := js.GetJob(ctx, "job_1")
 	if got.Status != store.JobRunning || got.Done != 1 {
 		t.Fatalf("after 1: status=%s done=%d", got.Status, got.Done)
 	}
 
-	_ = js.AppendResult(ctx, "job_1", verdict.Verdict{Email: "b@x.com", Status: verdict.StatusUndeliverable})
+	_ = js.AppendResult(ctx, "job_1", store.Result{Label: "Acme Ltd", Verdict: verdict.Verdict{Email: "b@x.com", Status: verdict.StatusUndeliverable}})
 	got, _ = js.GetJob(ctx, "job_1")
 	if got.Status != store.JobCompleted || got.Done != 2 || got.CompletedAt == nil {
 		t.Fatalf("after 2: status=%s done=%d completed=%v", got.Status, got.Done, got.CompletedAt)
@@ -103,6 +103,11 @@ func TestJobStoreLifecycle(t *testing.T) {
 	page, next, _ := js.Results(ctx, "job_1", 0, 1)
 	if len(page) != 1 || next != 1 {
 		t.Fatalf("page1: len=%d next=%d", len(page), next)
+	}
+	// The client label must survive the round-trip, or an uploaded list cannot
+	// be matched back to its source sheet.
+	if page[0].Label != "Acme Ltd" {
+		t.Errorf("label = %q, want Acme Ltd", page[0].Label)
 	}
 	page, next, _ = js.Results(ctx, "job_1", 1, 1)
 	if len(page) != 1 || next != 0 {
@@ -117,7 +122,7 @@ func TestJobStoreNotFound(t *testing.T) {
 	if _, err := js.GetJob(ctx, "nope"); !errors.Is(err, store.ErrJobNotFound) {
 		t.Errorf("GetJob: %v", err)
 	}
-	if err := js.AppendResult(ctx, "nope", verdict.Verdict{}); !errors.Is(err, store.ErrJobNotFound) {
+	if err := js.AppendResult(ctx, "nope", store.Result{Label: "Acme Ltd", Verdict: verdict.Verdict{}}); !errors.Is(err, store.ErrJobNotFound) {
 		t.Errorf("AppendResult: %v", err)
 	}
 	if _, _, err := js.Results(ctx, "nope", 0, 10); !errors.Is(err, store.ErrJobNotFound) {

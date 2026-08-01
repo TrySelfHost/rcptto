@@ -109,8 +109,8 @@ func (s *JobStore) GetJob(ctx context.Context, id string) (store.Job, error) {
 
 // AppendResult implements store.JobStore. It atomically records the verdict,
 // increments done, and completes the job when done reaches total.
-func (s *JobStore) AppendResult(ctx context.Context, jobID string, v verdict.Verdict) error {
-	raw, err := json.Marshal(v)
+func (s *JobStore) AppendResult(ctx context.Context, jobID string, r store.Result) error {
+	raw, err := json.Marshal(r.Verdict)
 	if err != nil {
 		return err
 	}
@@ -134,8 +134,8 @@ func (s *JobStore) AppendResult(ctx context.Context, jobID string, v verdict.Ver
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO job_results (job_id, idx, verdict) VALUES ($1, $2, $3)`,
-		jobID, done-1, raw,
+		`INSERT INTO job_results (job_id, idx, verdict, label) VALUES ($1, $2, $3, $4)`,
+		jobID, done-1, raw, r.Label,
 	); err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (s *JobStore) AppendResult(ctx context.Context, jobID string, v verdict.Ver
 }
 
 // Results implements store.JobStore.
-func (s *JobStore) Results(ctx context.Context, jobID string, cursor, limit int) ([]verdict.Verdict, int, error) {
+func (s *JobStore) Results(ctx context.Context, jobID string, cursor, limit int) ([]store.Result, int, error) {
 	if _, err := s.GetJob(ctx, jobID); err != nil {
 		return nil, 0, err
 	}
@@ -165,7 +165,7 @@ func (s *JobStore) Results(ctx context.Context, jobID string, cursor, limit int)
 
 	// Fetch one extra row to determine whether a further page exists.
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT verdict FROM job_results WHERE job_id = $1 ORDER BY idx OFFSET $2 LIMIT $3`,
+		`SELECT verdict, label FROM job_results WHERE job_id = $1 ORDER BY idx OFFSET $2 LIMIT $3`,
 		jobID, cursor, limit+1,
 	)
 	if err != nil {
@@ -173,17 +173,18 @@ func (s *JobStore) Results(ctx context.Context, jobID string, cursor, limit int)
 	}
 	defer func() { _ = rows.Close() }()
 
-	items := make([]verdict.Verdict, 0, limit)
+	items := make([]store.Result, 0, limit)
 	for rows.Next() {
 		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var label string
+		if err := rows.Scan(&raw, &label); err != nil {
 			return nil, 0, err
 		}
 		var v verdict.Verdict
 		if err := json.Unmarshal(raw, &v); err != nil {
 			return nil, 0, err
 		}
-		items = append(items, v)
+		items = append(items, store.Result{Label: label, Verdict: v})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
