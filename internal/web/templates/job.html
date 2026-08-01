@@ -9,6 +9,10 @@
 
 {{define "content-job"}}
 <h1>Job <span class="mono">{{.Job.ID}}</span></h1>
+<div class="row" style="margin-bottom:1.25rem">
+  <a href="/jobs/{{.Job.ID}}/export/csv"><button type="button" class="secondary">Export CSV</button></a>
+  <a href="/jobs/{{.Job.ID}}/export/xlsx"><button type="button" class="secondary">Export XLSX</button></a>
+</div>
 
 <div id="job-status" {{if .Job.Running}}hx-get="/jobs/{{.Job.ID}}/status" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
   {{template "job-status-inner" .}}

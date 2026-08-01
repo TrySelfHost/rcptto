@@ -10,7 +10,21 @@
   <div id="result" style="margin-top:1rem"></div>
 </div>
 
-<h2>Bulk verification</h2>
+<h2>Upload a list</h2>
+<div class="card">
+  <form hx-post="/upload" hx-target="#upload-result" hx-swap="innerHTML"
+        hx-encoding="multipart/form-data" class="stack">
+    <input type="file" name="file" accept=".csv,.xlsx,.xlsm,.tsv,.txt" required>
+    <div class="hint">
+      CSV or XLSX. Columns for the client name and email address are detected
+      automatically; you confirm the mapping before anything is verified.
+    </div>
+    <div><button type="submit">Read file</button></div>
+  </form>
+  <div id="upload-result" style="margin-top:1rem"></div>
+</div>
+
+<h2>Paste addresses</h2>
 <div class="card">
   <form hx-post="/jobs" hx-target="#job-create-result" hx-swap="innerHTML">
     <textarea name="emails" placeholder="one address per line&#10;a@example.com&#10;b@example.com" required></textarea>

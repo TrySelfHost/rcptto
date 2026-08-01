@@ -107,7 +107,7 @@ func TestHomeRenders(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<!doctype html>", "Verify an address", "Bulk verification", "/assets/htmx.min.js"} {
+	for _, want := range []string{"<!doctype html>", "Verify an address", "Paste addresses", "/assets/htmx.min.js"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("home page missing %q", want)
 		}

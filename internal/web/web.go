@@ -88,9 +88,10 @@ type Config struct {
 
 // Server serves the dashboard.
 type Server struct {
-	cfg  Config
-	tmpl *template.Template
-	auth *auth
+	cfg     Config
+	tmpl    *template.Template
+	auth    *auth
+	uploads *uploadCache
 }
 
 // New builds a dashboard Server. It panics on a nil Verifier or an invalid
@@ -105,7 +106,7 @@ func New(cfg Config) *Server {
 		panic(err)
 	}
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
-	return &Server{cfg: cfg, tmpl: tmpl, auth: a}
+	return &Server{cfg: cfg, tmpl: tmpl, auth: a, uploads: newUploadCache()}
 }
 
 // Handler returns the composed HTTP handler.
@@ -119,6 +120,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /jobs/{id}/status", s.handleJobStatus)
 	mux.HandleFunc("GET /jobs/{id}/results", s.handleJobResultsPage)
 	mux.HandleFunc("POST /jobs/{id}/cancel", s.handleJobCancel)
+	mux.HandleFunc("GET /jobs/{id}/export/{format}", s.handleJobExport)
+	mux.HandleFunc("POST /upload", s.handleUploadPreview)
+	mux.HandleFunc("POST /upload/confirm", s.handleUploadConfirm)
 	mux.HandleFunc("GET /egress", s.handleEgress)
 	mux.HandleFunc("POST /egress/{id}/quarantine", s.handleEgressQuarantine)
 	mux.HandleFunc("POST /egress/{id}/enable", s.handleEgressEnable)

@@ -46,10 +46,9 @@ What exists today:
 | [`internal/egress/audit`](internal/egress/audit) | Proactive reputation audits: DNSBL (blocklist) checks that quarantine a listed IP before probes start failing, and PTR/FCrDNS reverse-DNS verification. Injectable resolver; the server runs DNSBL audits on a schedule when `RCPTTO_DNSBL_ZONES` is set. | ✅ implemented + tested |
 | [`internal/api/admin.go`](internal/api/admin.go) | Admin API — `GET /v1/admin/egress`, quarantine/enable/disable per identity, `GET/PUT /v1/admin/policies` — so the reputation system is inspectable and operable at runtime, not just at startup. Behind the same API-key auth as the rest of `/v1`. | ✅ implemented + tested |
 
-| [`internal/web`](internal/web) | The dashboard — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
+| [`internal/web`](internal/web) | The dashboard — including CSV/XLSX upload with a column-mapping preview, and result export that preserves the client name. Uploading — server-rendered HTML + htmx, embedded via `go:embed` (no Node build step, still one binary). Verify form, bulk submission, live job progress, and operable egress/policy screens. | ✅ implemented + tested |
 
-Coming next: the dashboard upload UI (file picker, column-mapping preview) and
-CSV/XLSX export of results with the client name preserved. Then deployment packaging for agents (Dockerfile, systemd unit, and a
+Coming next: deployment packaging for agents (Dockerfile, systemd unit, and a
 guide for standing up a multi-VPS pool). Then Prometheus metrics and wiring
 PTR/FCrDNS audit results into reputation scoring. After that:
 Prometheus metrics and wiring PTR/FCrDNS audit results into reputation scoring. Kubernetes/Helm/NATS/ClickHouse are intentionally out of scope for now — see [Deployment scope](#deployment-scope-current) above. Full roadmap in [`docs/DESIGN.md`](docs/DESIGN.md#22-roadmap).
