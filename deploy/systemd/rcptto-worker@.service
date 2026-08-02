@@ -1,0 +1,68 @@
+# systemd template unit for rcptto-worker (remote probe agent).
+#
+# This is a TEMPLATE unit: the instance name selects the environment file, so a
+# host with several egress IPs runs one agent per IP without duplicating the
+# unit. An agent owns exactly one identity by design — binding a specific source
+# address is the only way to guarantee a probe leaves via the intended IP.
+#
+# Install (per host):
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin rcptto
+#   sudo install -m 0755 rcptto-worker /usr/local/bin/rcptto-worker
+#   sudo install -d -o root -g rcptto -m 0750 /etc/rcptto
+#   sudo install -m 0644 rcptto-worker@.service /etc/systemd/system/
+#
+# Then one env file per IP, e.g. /etc/rcptto/worker-eg_vps1a.env:
+#   sudo install -m 0640 -o root -g rcptto worker.env /etc/rcptto/worker-eg_vps1a.env
+#   sudo systemctl enable --now rcptto-worker@eg_vps1a
+#
+# A second IP on the same host:
+#   sudo systemctl enable --now rcptto-worker@eg_vps1b
+#
+# Logs:   journalctl -u rcptto-worker@eg_vps1a -f
+# Status: systemctl status 'rcptto-worker@*'
+
+[Unit]
+Description=rcptto probe agent (%i)
+Documentation=https://github.com/tryselfhost/rcptto
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rcptto
+Group=rcptto
+
+# %i is the instance name, so each agent gets its own identity, port, and IP.
+EnvironmentFile=/etc/rcptto/worker-%i.env
+ExecStart=/usr/local/bin/rcptto-worker
+
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=45s
+
+# --- Hardening --------------------------------------------------------------
+# An agent needs outbound DNS and SMTP and an inbound listener. It needs nothing
+# else from the host: no filesystem writes, no privilege escalation, no devices.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

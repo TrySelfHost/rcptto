@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build for rcptto-worker, the remote probe agent.
+#
+# An agent owns exactly one egress IP and does nothing else: no database, no
+# jobs, no dashboard. A machine with two IPs runs two agents on different ports.
+#
+# Dependencies are vendored (see docs/DEPENDENCIES.md), so this builds with no
+# network access to any module proxy.
+
+# ---- build ----------------------------------------------------------------
+FROM golang:1.24-alpine AS build
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+COPY vendor/ ./vendor/
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -mod=vendor \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/rcptto-worker \
+      ./cmd/rcptto-worker
+
+# ---- runtime ---------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/rcptto-worker /usr/local/bin/rcptto-worker
+
+EXPOSE 9090
+USER nonroot:nonroot
+
+ENTRYPOINT ["/usr/local/bin/rcptto-worker"]

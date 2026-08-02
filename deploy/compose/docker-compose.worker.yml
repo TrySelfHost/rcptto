@@ -1,0 +1,44 @@
+# Probe agents for one host with two egress IPs.
+#
+# An agent owns exactly one identity, so a two-IP box runs two agents. Both use
+# host networking: an agent must bind a specific source IP, which it cannot do
+# from inside a bridge network where it only sees a private address.
+#
+#   cp deploy/compose/worker.env.example deploy/compose/worker.env   # then edit
+#   docker compose -f deploy/compose/docker-compose.worker.yml \
+#                  --env-file deploy/compose/worker.env up -d --build
+services:
+  agent-a:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.worker
+    image: rcptto-worker:latest
+    restart: unless-stopped
+    # Required: binding a source IP needs the host's real addresses.
+    network_mode: host
+    environment:
+      RCPTTO_WORKER_ID: ${AGENT_A_ID:?AGENT_A_ID is required}
+      RCPTTO_WORKER_ADDR: ${AGENT_A_ADDR:-:9090}
+      RCPTTO_WORKER_IP: ${AGENT_A_IP:?AGENT_A_IP is required}
+      RCPTTO_HELO: ${AGENT_A_HELO:?AGENT_A_HELO is required}
+      RCPTTO_MAIL_FROM: ${AGENT_A_MAIL_FROM:?AGENT_A_MAIL_FROM is required}
+      RCPTTO_WORKER_TOKEN: ${RCPTTO_WORKER_TOKEN:?RCPTTO_WORKER_TOKEN is required}
+      RCPTTO_WORKER_REGION: ${AGENT_REGION:-}
+      RCPTTO_WORKER_ASN: ${AGENT_ASN:-}
+
+  agent-b:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.worker
+    image: rcptto-worker:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      RCPTTO_WORKER_ID: ${AGENT_B_ID:?AGENT_B_ID is required}
+      RCPTTO_WORKER_ADDR: ${AGENT_B_ADDR:-:9091}
+      RCPTTO_WORKER_IP: ${AGENT_B_IP:?AGENT_B_IP is required}
+      RCPTTO_HELO: ${AGENT_B_HELO:?AGENT_B_HELO is required}
+      RCPTTO_MAIL_FROM: ${AGENT_B_MAIL_FROM:?AGENT_B_MAIL_FROM is required}
+      RCPTTO_WORKER_TOKEN: ${RCPTTO_WORKER_TOKEN:?RCPTTO_WORKER_TOKEN is required}
+      RCPTTO_WORKER_REGION: ${AGENT_REGION:-}
+      RCPTTO_WORKER_ASN: ${AGENT_ASN:-}
